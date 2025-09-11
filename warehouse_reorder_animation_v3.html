@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Warehouse Reorder Animation – v3 (22 pares, mínimos movimientos)</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 10px; }
+  #controls { margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button { padding: 6px 10px; font-size: 14px; }
+  #status { margin-left: 10px; font-weight: bold; }
+  canvas { border: 1px solid #ccc; background: #fff; }
+  .legend { font-size: 12px; color: #333; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h2>Warehouse Reorder – v3 (22 pares, mínimos movimientos)</h2>
+<div id="controls">
+  <button id="playPause">Play</button>
+  <button id="step">Step</button>
+  <button id="reset">Reset</button>
+  <label>Speed: <input id="speed" type="range" min="0.2" max="2" value="1" step="0.1"></label>
+  <span id="status"></span>
+</div>
+<canvas id="c" width="1100" height="600"></canvas>
+<div class="legend">
+  Estrategia: dejar <b>N3..N6</b> como están (<b>63,63,66,66</b>) — 2 pares sin mover. Mover solo pares “baratos” y superficiales para completar 22 pares.
+</div>
+<script>
+// ---------------- Estado inicial ----------------
+const colsNames = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N"];
+let columns = {
+  "A": [112,108,40,112,106,105],
+  "B": [129,120,6,5,5,119],
+  "C": [101,143,68,52,55,59],
+  "D": [205,218,218,204,213,213],
+  "E": [16,53,115,37,84,83],
+  "F": [null,106,6,142,120,142],
+  "G": [1,57,119,109,19,13],
+  "H": [58,133,53,57,58,49],
+  "I": [null,39,108,128,70,82],
+  "J": [null,null,null,127,127,138],
+  "K": [207,153,158,156,157,156],
+  "L": [134,132,132,73,73,133],
+  "M": [null,21,26,26,21,31],
+  "N": [128,59,63,63,66,66]  // N3..N6 no se mueven
+};
+
+// ---------------- Plan (pasos) ----------------
+// P3 (6,57,58) – horizontales fáciles
+// P2 (218,53,132)
+// P1 (108,128,112) – movemos N1=128, no N2=59
+// P4 (21,26) – 2 pares (no hace falta 3 si ya cerramos 22 globales)
+// P5 (106,120) – 2 pares (sin 59)
+// P6 (133,5,73)
+// P7 (119,127,142)
+// P8 (156)
+// + Columna N aporta 2 pares (63,66) sin mover
+const steps = [
+  // P3
+  { title: "B3 + F3 → P3 (6)",   from:[["B",3],["F",3]], num:6,   pile:"P3" },
+  { title: "G2 + H4 → P3 (57)",  from:[["G",2],["H",4]], num:57,  pile:"P3" },
+  { title: "H1 + H5 → P3 (58)",  from:[["H",1],["H",5]], num:58,  pile:"P3" },
+
+  // P2
+  { title: "D2 + D3 → P2 (218)", from:[["D",2],["D",3]], num:218, pile:"P2" },
+  { title: "E2 + H3 → P2 (53)",  from:[["E",2],["H",3]], num:53,  pile:"P2" },
+  { title: "L2 + L3 → P2 (132)", from:[["L",2],["L",3]], num:132, pile:"P2" },
+
+  // P1
+  { title: "A2 + I3 → P1 (108)", from:[["A",2],["I",3]], num:108, pile:"P1" },
+  { title: "N1 + I4 → P1 (128)", from:[["N",1],["I",4]], num:128, pile:"P1" },
+  { title: "A1 + A4 → P1 (112)", from:[["A",1],["A",4]], num:112, pile:"P1" },
+
+  // P4 – 2 pares rápidos
+  { title: "M2 + M5 → P4 (21)",  from:[["M",2],["M",5]], num:21,  pile:"P4" },
+  { title: "M3 + M4 → P4 (26)",  from:[["M",3],["M",4]], num:26,  pile:"P4" },
+
+  // P5 – 2 pares
+  { title: "A5 + F2 → P5 (106)", from:[["A",5],["F",2]], num:106, pile:"P5" },
+  { title: "B2 + F5 → P5 (120)", from:[["B",2],["F",5]], num:120, pile:"P5" },
+
+  // P6
+  { title: "H2 + L6 → P6 (133)", from:[["H",2],["L",6]], num:133, pile:"P6" },
+  { title: "B4 + B5 → P6 (5)",   from:[["B",4],["B",5]], num:5,   pile:"P6" },
+  { title: "L4 + L5 → P6 (73)",  from:[["L",4],["L",5]], num:73,  pile:"P6" },
+
+  // P7
+  { title: "G3 + B6 → P7 (119)", from:[["G",3],["B",6]], num:119, pile:"P7" },
+  { title: "J4 + J5 → P7 (127)", from:[["J",4],["J",5]], num:127, pile:"P7" },
+  { title: "F4 + F6 → P7 (142)", from:[["F",4],["F",6]], num:142, pile:"P7" },
+
+  // P8
+  { title: "K4 + K6 → P8 (156)", from:[["K",4],["K",6]], num:156, pile:"P8" }
+];
+// Pares “gratis” en columna N (no se animan porque no se mueven): (63,63) y (66,66)
+
+// ---------------- Geometría y dibujo ----------------
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const margin = 20, rows = 6;
+const leftW = Math.floor(W*0.62);
+const rightW = W - leftW;
+const colSpacing = (leftW - 2*margin) / colsNames.length;
+const pileSpacing = (rightW - 2*margin) / 8;
+const cellW = Math.floor(colSpacing*0.8);
+const cellH = Math.floor((H - 2*margin) / (rows + 2));
+const leftX0 = margin, rightX0 = leftW + margin, topY = margin;
+
+const palette = ["#3498db","#2ecc71","#e74c3c","#9b59b6","#f1c40f","#1abc9c","#e67e22","#95a5a6","#2980b9","#27ae60","#c0392b","#8e44ad"];
+const colorMap = {};
+function colorFor(n){
+  if(!colorMap[n]) colorMap[n] = palette[Object.keys(colorMap).length % palette.length];
+  return colorMap[n];
+}
+function colCellXY(colIdx, rowIdx){
+  const x = Math.floor(leftX0 + colIdx*colSpacing + (colSpacing - cellW)/2);
+  const y = Math.floor(topY + (rowIdx-1)*cellH);
+  return [x,y];
+}
+function pileCellXY(pileIdx, stackHeight){
+  const x = Math.floor(rightX0 + pileIdx*pileSpacing + (pileSpacing - cellW)/2);
+  const yBase = topY + rows*cellH;
+  const y = Math.floor(yBase - (stackHeight+1)*cellH);
+  return [x,y];
+}
+function drawBox(x,y,w,h,num,alpha=1){
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = colorFor(num);
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 1;
+  ctx.fillRect(x,y,w,h);
+  ctx.strokeRect(x,y,w,h);
+  ctx.fillStyle = "#000";
+  ctx.globalAlpha = 1;
+  ctx.font = "bold 14px Arial";
+  const t = String(num), tw = ctx.measureText(t).width;
+  ctx.fillText(t, x + (w - tw)/2, y + h/2 + 5);
+}
+function drawBackground(title){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#000";
+  ctx.font = "bold 18px Arial";
+  ctx.fillText(title, margin, 18);
+  ctx.font = "12px Arial";
+  colsNames.forEach((c, i)=>{
+    const [x] = colCellXY(i,1);
+    ctx.fillText(c, x, topY-6);
+  });
+  for(let i=0;i<8;i++){
+    const [x] = pileCellXY(i,0);
+    ctx.fillText("P"+(i+1), x, topY-6);
+  }
+}
+function renderState(title, moving=null){
+  drawBackground(title);
+  // columnas
+  colsNames.forEach((c, i)=>{
+    for(let r=1; r<=rows; r++){
+      const val = columns[c][r-1];
+      if(val!==null && val!==undefined){
+        const [x,y] = colCellXY(i,r);
+        drawBox(x,y,cellW,cellH,val,1);
+      }
+    }
+  });
+  // pilas
+  for(let pi=0; pi<8; pi++){
+    const stack = piles["P"+(pi+1)];
+    for(let s=0; s<stack.length; s++){
+      const [x,y] = pileCellXY(pi,s);
+      drawBox(x,y,cellW,cellH,stack[s],1);
+    }
+  }
+  // overlays en movimiento
+  if(moving){
+    moving.forEach(m=> drawBox(m.x, m.y, cellW, cellH, m.num, 0.9));
+  }
+}
+
+// ---------------- Motor de animación ----------------
+let piles = {"P1":[], "P2":[], "P3":[], "P4":[], "P5":[], "P6":[], "P7":[], "P8":[]};
+let playing = false, currentStep = 0, speed = 1.0;
+const statusEl = document.getElementById('status');
+function setStatus(){ statusEl.textContent = steps[currentStep] ? steps[currentStep].title : "Completado (N conserva 63,63 y 66,66)"; }
+
+function resetAll(){
+  columns = JSON.parse(JSON.stringify({
+    "A": [112,108,40,112,106,105],
+    "B": [129,120,6,5,5,119],
+    "C": [101,143,68,52,55,59],
+    "D": [205,218,218,204,213,213],
+    "E": [16,53,115,37,84,83],
+    "F": [null,106,6,142,120,142],
+    "G": [1,57,119,109,19,13],
+    "H": [58,133,53,57,58,49],
+    "I": [null,39,108,128,70,82],
+    "J": [null,null,null,127,127,138],
+    "K": [207,153,158,156,157,156],
+    "L": [134,132,132,73,73,133],
+    "M": [null,21,26,26,21,31],
+    "N": [128,59,63,63,66,66]
+  }));
+  piles = {"P1":[], "P2":[], "P3":[], "P4":[], "P5":[], "P6":[], "P7":[], "P8":[]};
+  currentStep = 0;
+  setStatus();
+  renderState("Estado inicial");
+}
+function doOneStep(){
+  if(currentStep >= steps.length) return;
+  const s = steps[currentStep];
+  const [c1,r1] = s.from[0], [c2,r2] = s.from[1];
+  const ci1 = colsNames.indexOf(c1), ci2 = colsNames.indexOf(c2);
+  const [sx1,sy1] = colCellXY(ci1, r1);
+  const [sx2,sy2] = colCellXY(ci2, r2);
+  // retirar de columnas
+  columns[c1][r1-1] = null;
+  columns[c2][r2-1] = null;
+  // destino
+  const h0 = piles[s.pile].length;
+  const pileIndex = parseInt(s.pile.slice(1)) - 1;
+  const [dx1,dy1] = pileCellXY(pileIndex, h0);
+  const [dx2,dy2] = pileCellXY(pileIndex, h0+1);
+  const frames = Math.max(8, Math.floor(24 / speed));
+  let f = 0;
+  function anim(){
+    if(f>frames){
+      piles[s.pile].push(s.num);
+      piles[s.pile].push(s.num);
+      renderState(s.title + " – colocado");
+      currentStep++;
+      setStatus();
+      if(playing) requestAnimationFrame(loop);
+      return;
+    }
+    const frac = f/frames;
+    const mx1 = sx1 + (dx1 - sx1)*frac, my1 = sy1 + (dy1 - sy1)*frac;
+    const mx2 = sx2 + (dx2 - sx2)*frac, my2 = sy2 + (dy2 - sy2)*frac;
+    renderState(s.title, [{num:s.num, x:mx1, y:my1}, {num:s.num, x:mx2, y:my2}]);
+    f++; requestAnimationFrame(anim);
+  }
+  anim();
+}
+function loop(){
+  if(!playing) return;
+  if(currentStep >= steps.length){
+    playing = false; renderState("Completado (N conserva 63,63 y 66,66)");
+    return;
+  }
+  doOneStep();
+}
+document.getElementById('playPause').addEventListener('click', ()=>{
+  playing = !playing;
+  if(playing){ loop(); document.getElementById('playPause').textContent = "Pause"; }
+  else { document.getElementById('playPause').textContent = "Play"; }
+});
+document.getElementById('step').addEventListener('click', ()=>{
+  if(currentStep < steps.length) doOneStep();
+});
+document.getElementById('reset').addEventListener('click', ()=>{
+  resetAll(); document.getElementById('playPause').textContent = "Play"; playing = false;
+});
+document.getElementById('speed').addEventListener('input', (e)=>{ speed = parseFloat(e.target.value); });
+
+resetAll();
+</script>
+</body>
+</html>
