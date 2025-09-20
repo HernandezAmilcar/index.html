@@ -1,268 +1,503 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
-<meta charset="UTF-8" />
-<title>Warehouse Reorder Animation – v3 (22 pares, mínimos movimientos)</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 10px; }
-  #controls { margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  button { padding: 6px 10px; font-size: 14px; }
-  #status { margin-left: 10px; font-weight: bold; }
-  canvas { border: 1px solid #ccc; background: #fff; }
-  .legend { font-size: 12px; color: #333; margin-top: 6px; }
-</style>
+  <meta charset="utf-8" />
+  <title>Simulador X→Z→Y (pares, movimiento mínimo)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg:#f6f7fb; --fg:#0f172a; --muted:#64748b; --card:#ffffff; --line:#e2e8f0;
+      --green:#10b981; --amber:#f59e0b; --blue:#2563eb; --rose:#f43f5e;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:var(--bg); color:var(--fg); }
+    .wrap { max-width:1200px; margin:0 auto; padding:24px; }
+    h1 { font-size:22px; margin:0 0 8px; }
+    .muted { color:var(--muted); font-size:13px; }
+    .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    .grid-3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    textarea { width:100%; height:190px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:13px; padding:10px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    input[type="number"]{ width:110px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; }
+    .btn { padding:8px 12px; border-radius:999px; border:0; cursor:pointer; font-weight:600; }
+    .btn.primary { background:#111827; color:#fff; }
+    .btn.alt { background:var(--blue); color:#fff; }
+    .btn.ghost { background:#eef2ff; color:#111827; }
+    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .kpi { font-size:13px; color:var(--muted); }
+
+    /* Zonas y pilas */
+    .zone-title { font-weight:700; font-size:14px; margin-bottom:8px; }
+    .zone { min-height:180px; display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+    .zone.x { border-color:#cbd5e1; }
+    .zone.z { border-color:#fbbf24; }
+    .zone.y { border-color:#34d399; }
+    .stack { border:1px solid var(--line); border-radius:14px; padding:10px; background:#fff; min-width:120px; max-width:140px; }
+    .stack-h { font-size:12px; font-weight:700; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }
+    .stack-body { display:flex; flex-direction:column-reverse; gap:6px; min-height:24px; }
+    .box { padding:6px 8px; font-size:12px; text-align:center; background:#f1f5f9; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 1px 0 rgba(0,0,0,.03); }
+    .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+
+    /* Animación (clones en overlay) */
+    .overlay { position:fixed; left:0; top:0; width:100vw; height:100vh; pointer-events:none; z-index:9999; }
+    .clone { position:fixed; background:#e2e8f0; border:1px solid #cbd5e1; border-radius:8px; padding:6px 8px; font-size:12px; box-shadow:0 8px 20px rgba(0,0,0,.15); transition: transform .6s ease, opacity .6s ease; display:flex; align-items:center; justify-content:center; }
+    .highlight { outline:2px solid #60a5fa; outline-offset:2px; }
+    .list { display:flex; gap:6px; flex-wrap:wrap; }
+    .chip { font-size:12px; background:#ecfeff; border:1px solid #cffafe; color:#0e7490; padding:4px 8px; border-radius:999px; }
+    .small { font-size:12px; }
+  </style>
 </head>
 <body>
-<h2>Warehouse Reorder – v3 (22 pares, mínimos movimientos)</h2>
-<div id="controls">
-  <button id="playPause">Play</button>
-  <button id="step">Step</button>
-  <button id="reset">Reset</button>
-  <label>Speed: <input id="speed" type="range" min="0.2" max="2" value="1" step="0.1"></label>
-  <span id="status"></span>
-</div>
-<canvas id="c" width="1100" height="600"></canvas>
-<div class="legend">
-  Estrategia: dejar <b>N3..N6</b> como están (<b>63,63,66,66</b>) — 2 pares sin mover. Mover solo pares “baratos” y superficiales para completar 22 pares.
-</div>
-<script>
-// ---------------- Estado inicial ----------------
-const colsNames = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N"];
-let columns = {
-  "A": [112,108,40,112,106,105],
-  "B": [129,120,6,5,5,119],
-  "C": [101,143,68,52,55,59],
-  "D": [205,218,218,204,213,213],
-  "E": [16,53,115,37,84,83],
-  "F": [null,106,6,142,120,142],
-  "G": [1,57,119,109,19,13],
-  "H": [58,133,53,57,58,49],
-  "I": [null,39,108,128,70,82],
-  "J": [null,null,null,127,127,138],
-  "K": [207,153,158,156,157,156],
-  "L": [134,132,132,73,73,133],
-  "M": [null,21,26,26,21,31],
-  "N": [128,59,63,63,66,66]  // N3..N6 no se mueven
-};
+  <div class="wrap">
+    <h1>Simulador X→Z→Y (pares · movimientos mínimos)</h1>
+    <div class="muted">Pega tus pilas en formato <b>Xn: a,b,c...</b> (el primer número es la <b>caja superior</b>). Selecciono pilas automáticamente según la <b>meta de pares</b>, genero el plan y muestro la animación.</div>
 
-// ---------------- Plan (pasos) ----------------
-// P3 (6,57,58) – horizontales fáciles
-// P2 (218,53,132)
-// P1 (108,128,112) – movemos N1=128, no N2=59
-// P4 (21,26) – 2 pares (no hace falta 3 si ya cerramos 22 globales)
-// P5 (106,120) – 2 pares (sin 59)
-// P6 (133,5,73)
-// P7 (119,127,142)
-// P8 (156)
-// + Columna N aporta 2 pares (63,66) sin mover
-const steps = [
-  // P3
-  { title: "B3 + F3 → P3 (6)",   from:[["B",3],["F",3]], num:6,   pile:"P3" },
-  { title: "G2 + H4 → P3 (57)",  from:[["G",2],["H",4]], num:57,  pile:"P3" },
-  { title: "H1 + H5 → P3 (58)",  from:[["H",1],["H",5]], num:58,  pile:"P3" },
+    <div class="grid-2" style="margin-top:14px;">
+      <div class="card">
+        <textarea id="input"></textarea>
+        <div class="toolbar" style="margin-top:10px;">
+          <label class="muted">Meta de pares:</label>
+          <input type="number" id="targetPairs" min="1" value="22" />
+          <button class="btn primary" id="btnSelect">Seleccionar pilas automáticamente</button>
+          <button class="btn alt" id="btnPlan">Generar plan</button>
+        </div>
+        <div class="kpi" id="kpi"></div>
+      </div>
 
-  // P2
-  { title: "D2 + D3 → P2 (218)", from:[["D",2],["D",3]], num:218, pile:"P2" },
-  { title: "E2 + H3 → P2 (53)",  from:[["E",2],["H",3]], num:53,  pile:"P2" },
-  { title: "L2 + L3 → P2 (132)", from:[["L",2],["L",3]], num:132, pile:"P2" },
+      <div class="card">
+        <div class="zone-title">Pilas seleccionadas para USAR</div>
+        <div id="useList" class="list"></div>
+        <div class="zone-title" style="margin-top:10px;">Pilas DESCARTADAS</div>
+        <div id="discardList" class="list"></div>
+      </div>
+    </div>
 
-  // P1
-  { title: "A2 + I3 → P1 (108)", from:[["A",2],["I",3]], num:108, pile:"P1" },
-  { title: "N1 + I4 → P1 (128)", from:[["N",1],["I",4]], num:128, pile:"P1" },
-  { title: "A1 + A4 → P1 (112)", from:[["A",1],["A",4]], num:112, pile:"P1" },
+    <div class="grid-3" style="margin-top:16px;">
+      <div class="card">
+        <div class="zone-title">Originales (X)</div>
+        <div id="zoneX" class="zone x"></div>
+      </div>
+      <div class="card">
+        <div class="zone-title">Temporales (Z)</div>
+        <div id="zoneZ" class="zone z"></div>
+      </div>
+      <div class="card">
+        <div class="zone-title">Finales (Y)</div>
+        <div id="zoneY" class="zone y"></div>
+      </div>
+    </div>
 
-  // P4 – 2 pares rápidos
-  { title: "M2 + M5 → P4 (21)",  from:[["M",2],["M",5]], num:21,  pile:"P4" },
-  { title: "M3 + M4 → P4 (26)",  from:[["M",3],["M",4]], num:26,  pile:"P4" },
+    <div class="card" style="margin-top:16px;">
+      <div class="zone-title">Plan de pasos</div>
+      <ol id="steps" class="small"></ol>
+      <div class="toolbar" style="margin-top:8px;">
+        <button class="btn primary" id="btnPlay">Iniciar simulación</button>
+        <button class="btn ghost" id="btnPause">Pausa</button>
+        <button class="btn ghost" id="btnStep">Paso</button>
+        <button class="btn ghost" id="btnReset">Reiniciar</button>
+        <span class="muted" id="progress"></span>
+      </div>
+    </div>
+  </div>
 
-  // P5 – 2 pares
-  { title: "A5 + F2 → P5 (106)", from:[["A",5],["F",2]], num:106, pile:"P5" },
-  { title: "B2 + F5 → P5 (120)", from:[["B",2],["F",5]], num:120, pile:"P5" },
+  <div class="overlay" id="overlay"></div>
 
-  // P6
-  { title: "H2 + L6 → P6 (133)", from:[["H",2],["L",6]], num:133, pile:"P6" },
-  { title: "B4 + B5 → P6 (5)",   from:[["B",4],["B",5]], num:5,   pile:"P6" },
-  { title: "L4 + L5 → P6 (73)",  from:[["L",4],["L",5]], num:73,  pile:"P6" },
-
-  // P7
-  { title: "G3 + B6 → P7 (119)", from:[["G",3],["B",6]], num:119, pile:"P7" },
-  { title: "J4 + J5 → P7 (127)", from:[["J",4],["J",5]], num:127, pile:"P7" },
-  { title: "F4 + F6 → P7 (142)", from:[["F",4],["F",6]], num:142, pile:"P7" },
-
-  // P8
-  { title: "K4 + K6 → P8 (156)", from:[["K",4],["K",6]], num:156, pile:"P8" }
-];
-// Pares “gratis” en columna N (no se animan porque no se mueven): (63,63) y (66,66)
-
-// ---------------- Geometría y dibujo ----------------
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
-const margin = 20, rows = 6;
-const leftW = Math.floor(W*0.62);
-const rightW = W - leftW;
-const colSpacing = (leftW - 2*margin) / colsNames.length;
-const pileSpacing = (rightW - 2*margin) / 8;
-const cellW = Math.floor(colSpacing*0.8);
-const cellH = Math.floor((H - 2*margin) / (rows + 2));
-const leftX0 = margin, rightX0 = leftW + margin, topY = margin;
-
-const palette = ["#3498db","#2ecc71","#e74c3c","#9b59b6","#f1c40f","#1abc9c","#e67e22","#95a5a6","#2980b9","#27ae60","#c0392b","#8e44ad"];
-const colorMap = {};
-function colorFor(n){
-  if(!colorMap[n]) colorMap[n] = palette[Object.keys(colorMap).length % palette.length];
-  return colorMap[n];
-}
-function colCellXY(colIdx, rowIdx){
-  const x = Math.floor(leftX0 + colIdx*colSpacing + (colSpacing - cellW)/2);
-  const y = Math.floor(topY + (rowIdx-1)*cellH);
-  return [x,y];
-}
-function pileCellXY(pileIdx, stackHeight){
-  const x = Math.floor(rightX0 + pileIdx*pileSpacing + (pileSpacing - cellW)/2);
-  const yBase = topY + rows*cellH;
-  const y = Math.floor(yBase - (stackHeight+1)*cellH);
-  return [x,y];
-}
-function drawBox(x,y,w,h,num,alpha=1){
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = colorFor(num);
-  ctx.strokeStyle = "#222";
-  ctx.lineWidth = 1;
-  ctx.fillRect(x,y,w,h);
-  ctx.strokeRect(x,y,w,h);
-  ctx.fillStyle = "#000";
-  ctx.globalAlpha = 1;
-  ctx.font = "bold 14px Arial";
-  const t = String(num), tw = ctx.measureText(t).width;
-  ctx.fillText(t, x + (w - tw)/2, y + h/2 + 5);
-}
-function drawBackground(title){
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle = "#000";
-  ctx.font = "bold 18px Arial";
-  ctx.fillText(title, margin, 18);
-  ctx.font = "12px Arial";
-  colsNames.forEach((c, i)=>{
-    const [x] = colCellXY(i,1);
-    ctx.fillText(c, x, topY-6);
-  });
-  for(let i=0;i<8;i++){
-    const [x] = pileCellXY(i,0);
-    ctx.fillText("P"+(i+1), x, topY-6);
-  }
-}
-function renderState(title, moving=null){
-  drawBackground(title);
-  // columnas
-  colsNames.forEach((c, i)=>{
-    for(let r=1; r<=rows; r++){
-      const val = columns[c][r-1];
-      if(val!==null && val!==undefined){
-        const [x,y] = colCellXY(i,r);
-        drawBox(x,y,cellW,cellH,val,1);
+  <script>
+    // ---------- Utilidades de datos ----------
+    function parseInput(raw){
+      const lines = raw.split(/\n+/).map(s=>s.trim()).filter(Boolean);
+      const piles = [];
+      for(const line of lines){
+        const m = line.match(/^(X\d+):\s*(.*)$/i);
+        if(!m) continue;
+        const id = m[1].toUpperCase();
+        const items = m[2].split(/[\s,]+/).map(x=>x.trim()).filter(Boolean).map(Number).filter(x=>!Number.isNaN(x));
+        piles.push({ id, items: items });
       }
+      return piles;
     }
-  });
-  // pilas
-  for(let pi=0; pi<8; pi++){
-    const stack = piles["P"+(pi+1)];
-    for(let s=0; s<stack.length; s++){
-      const [x,y] = pileCellXY(pi,s);
-      drawBox(x,y,cellW,cellH,stack[s],1);
+    function countMap(arr){ const m=new Map(); for(const v of arr) m.set(v,(m.get(v)||0)+1); return m; }
+    function pairsInArray(arr){ const m=countMap(arr); let p=0; for(const c of m.values()) p+=Math.floor(c/2); return p; }
+    function isOrganizedPile(items){
+      if(items.length===0) return false;
+      if(items.length%2!==0) return false;
+      if(items.length>6) return false;
+      const m=countMap(items);
+      for(const c of m.values()) if(c%2!==0) return false;
+      return true;
     }
-  }
-  // overlays en movimiento
-  if(moving){
-    moving.forEach(m=> drawBox(m.x, m.y, cellW, cellH, m.num, 0.9));
-  }
-}
-
-// ---------------- Motor de animación ----------------
-let piles = {"P1":[], "P2":[], "P3":[], "P4":[], "P5":[], "P6":[], "P7":[], "P8":[]};
-let playing = false, currentStep = 0, speed = 1.0;
-const statusEl = document.getElementById('status');
-function setStatus(){ statusEl.textContent = steps[currentStep] ? steps[currentStep].title : "Completado (N conserva 63,63 y 66,66)"; }
-
-function resetAll(){
-  columns = JSON.parse(JSON.stringify({
-    "A": [112,108,40,112,106,105],
-    "B": [129,120,6,5,5,119],
-    "C": [101,143,68,52,55,59],
-    "D": [205,218,218,204,213,213],
-    "E": [16,53,115,37,84,83],
-    "F": [null,106,6,142,120,142],
-    "G": [1,57,119,109,19,13],
-    "H": [58,133,53,57,58,49],
-    "I": [null,39,108,128,70,82],
-    "J": [null,null,null,127,127,138],
-    "K": [207,153,158,156,157,156],
-    "L": [134,132,132,73,73,133],
-    "M": [null,21,26,26,21,31],
-    "N": [128,59,63,63,66,66]
-  }));
-  piles = {"P1":[], "P2":[], "P3":[], "P4":[], "P5":[], "P6":[], "P7":[], "P8":[]};
-  currentStep = 0;
-  setStatus();
-  renderState("Estado inicial");
-}
-function doOneStep(){
-  if(currentStep >= steps.length) return;
-  const s = steps[currentStep];
-  const [c1,r1] = s.from[0], [c2,r2] = s.from[1];
-  const ci1 = colsNames.indexOf(c1), ci2 = colsNames.indexOf(c2);
-  const [sx1,sy1] = colCellXY(ci1, r1);
-  const [sx2,sy2] = colCellXY(ci2, r2);
-  // retirar de columnas
-  columns[c1][r1-1] = null;
-  columns[c2][r2-1] = null;
-  // destino
-  const h0 = piles[s.pile].length;
-  const pileIndex = parseInt(s.pile.slice(1)) - 1;
-  const [dx1,dy1] = pileCellXY(pileIndex, h0);
-  const [dx2,dy2] = pileCellXY(pileIndex, h0+1);
-  const frames = Math.max(8, Math.floor(24 / speed));
-  let f = 0;
-  function anim(){
-    if(f>frames){
-      piles[s.pile].push(s.num);
-      piles[s.pile].push(s.num);
-      renderState(s.title + " – colocado");
-      currentStep++;
-      setStatus();
-      if(playing) requestAnimationFrame(loop);
-      return;
+    function isComplementarySet(piles){
+      const m=new Map(); let ok=true;
+      for(const p of piles){ if(p.items.length>6) ok=false; for(const v of p.items) m.set(v,(m.get(v)||0)+1); }
+      if(!ok) return false;
+      for(const c of m.values()) if(c%2!==0) return false;
+      return true;
     }
-    const frac = f/frames;
-    const mx1 = sx1 + (dx1 - sx1)*frac, my1 = sy1 + (dy1 - sy1)*frac;
-    const mx2 = sx2 + (dx2 - sx2)*frac, my2 = sy2 + (dy2 - sy2)*frac;
-    renderState(s.title, [{num:s.num, x:mx1, y:my1}, {num:s.num, x:mx2, y:my2}]);
-    f++; requestAnimationFrame(anim);
-  }
-  anim();
-}
-function loop(){
-  if(!playing) return;
-  if(currentStep >= steps.length){
-    playing = false; renderState("Completado (N conserva 63,63 y 66,66)");
-    return;
-  }
-  doOneStep();
-}
-document.getElementById('playPause').addEventListener('click', ()=>{
-  playing = !playing;
-  if(playing){ loop(); document.getElementById('playPause').textContent = "Pause"; }
-  else { document.getElementById('playPause').textContent = "Play"; }
-});
-document.getElementById('step').addEventListener('click', ()=>{
-  if(currentStep < steps.length) doOneStep();
-});
-document.getElementById('reset').addEventListener('click', ()=>{
-  resetAll(); document.getElementById('playPause').textContent = "Play"; playing = false;
-});
-document.getElementById('speed').addEventListener('input', (e)=>{ speed = parseFloat(e.target.value); });
+    function findComplementaryGroups(xPiles){
+      const groups=[]; const used=new Set();
+      // pares
+      for(let i=0;i<xPiles.length;i++){
+        if(used.has(xPiles[i].id)) continue;
+        for(let j=i+1;j<xPiles.length;j++){
+          if(used.has(xPiles[j].id)) continue;
+          const pair=[xPiles[i],xPiles[j]];
+          if(isComplementarySet(pair)){ groups.push(pair.map(p=>p.id)); used.add(xPiles[i].id); used.add(xPiles[j].id); break; }
+        }
+      }
+      // tríos
+      for(let i=0;i<xPiles.length;i++){
+        if(used.has(xPiles[i].id)) continue;
+        for(let j=i+1;j<xPiles.length;j++){
+          if(used.has(xPiles[j].id)) continue;
+          for(let k=j+1;k<xPiles.length;k++){
+            if(used.has(xPiles[k].id)) continue;
+            const trio=[xPiles[i],xPiles[j],xPiles[k]];
+            if(isComplementarySet(trio)){ groups.push(trio.map(p=>p.id)); used.add(xPiles[i].id); used.add(xPiles[j].id); used.add(xPiles[k].id); break; }
+          }
+        }
+      }
+      return { groups, usedIds:used };
+    }
 
-resetAll();
-</script>
+    // Selección automática por meta de pares (sin que el usuario escoja)
+    function autoSelectPilesForPairs(piles, targetPairs){
+      const organized = piles.filter(p=>isOrganizedPile(p.items));
+      const disorganized = piles.filter(p=>!isOrganizedPile(p.items));
+      const selected=[]; let pairsAccum=0;
+
+      // 1) Y directas
+      for(const p of organized){
+        if(pairsAccum>=targetPairs) break;
+        selected.push(p); pairsAccum+=pairsInArray(p.items);
+      }
+      if(pairsAccum>=targetPairs) return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
+
+      // 2) Complementarios
+      const comp = findComplementaryGroups(disorganized);
+      const usedComp=new Set();
+      for(const grp of comp.groups){
+        if(pairsAccum>=targetPairs) break;
+        const groupPiles = grp.map(id=>disorganized.find(p=>p.id===id)).filter(Boolean);
+        const addPairs = pairsInArray(groupPiles.flatMap(p=>p.items));
+        for(const gp of groupPiles){ if(!selected.includes(gp)) selected.push(gp); usedComp.add(gp.id); }
+        pairsAccum+=addPairs;
+      }
+      if(pairsAccum>=targetPairs) return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
+
+      // 3) Potencial de pares interno
+      const rest = disorganized.filter(p=>!usedComp.has(p.id));
+      rest.sort((a,b)=>pairsInArray(b.items)-pairsInArray(a.items));
+      for(const p of rest){ if(pairsAccum>=targetPairs) break; selected.push(p); pairsAccum+=pairsInArray(p.items); }
+
+      return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
+    }
+
+    // Plan de movimientos (heurística mínima)
+    function planMoves(sourcePiles, targetPairs, maxZ=8){
+      const steps=[]; const Y=[]; const Z=[]; const X=sourcePiles.map(p=>({ id:p.id, items:[...p.items] }));
+      let yCounter=1, zCounter=0, pairsDone=0;
+
+      function openZ(){ const id=`Z${++zCounter}`; Z.push({id, items:[]}); steps.push({action:'open', id}); return Z[Z.length-1]; }
+      function openY(){ const id=`Y${yCounter++}`; Y.push({id, items:[]}); steps.push({action:'open', id}); return Y[Y.length-1]; }
+      function markY(p){ const id=`Y${yCounter++}`; Y.push({id, items:[...p.items]}); steps.push({action:'markY', from:p.id, to:id, note:'Directo: pila ya organizada'}); }
+      function move(k, from, to, note){ const g=from.items.splice(0,k); to.items.unshift(...g.reverse()); steps.push({action:'move', count:k, from:from.id, to:to.id, note}); }
+
+      // 1) Y directas
+      for(const p of X){
+        if(isOrganizedPile(p.items) && pairsDone<targetPairs){ markY(p); pairsDone+=pairsInArray(p.items); }
+      }
+
+      // 2) construcción de Y
+      function getY(){ let y=Y.find(yy=>yy.items.length<6); if(!y){ y=openY(); } return y; }
+      const scoreTop=(p)=>{ const top=p.items.slice(0,3); const m=countMap(top); let s=0; for(const c of m.values()) s=Math.max(s,c); return s + pairsInArray(p.items)*0.1; };
+
+      while(pairsDone<targetPairs){
+        const cands = X.filter(p=>p.items.length>0 && !isOrganizedPile(p.items));
+        if(cands.length===0) break;
+        cands.sort((a,b)=>scoreTop(b)-scoreTop(a));
+        const src=cands[0]; const y=getY();
+        let moved=false;
+        for(const k of [3,2]){
+          if(src.items.length>=k && y.items.length+k<=6){
+            const before=pairsInArray(y.items);
+            const tentative=[...y.items, ...src.items.slice(0,k)];
+            if(pairsInArray(tentative)>=before){
+              move(k, src, y, 'Top-group para aumentar pares');
+              const after=pairsInArray(y.items); pairsDone+=Math.max(0, after-before); moved=true; break;
+            }
+          }
+        }
+        if(!moved){
+          if(Z.length<maxZ && src.items.length>0){
+            const z=openZ(); const k=Math.min(3, src.items.length, 6-z.items.length);
+            if(k>0) move(k, src, z, 'Parqueo temporal en Z');
+          } else {
+            const alt=cands[1];
+            if(!alt) break;
+            for(const k of [3,2]){
+              if(alt.items.length>=k && y.items.length+k<=6){
+                const before=pairsInArray(y.items);
+                const tentative=[...y.items, ...alt.items.slice(0,k)];
+                if(pairsInArray(tentative)>=before){
+                  move(k, alt, y, 'Alternativa directa');
+                  const after=pairsInArray(y.items); pairsDone+=Math.max(0, after-before); break;
+                }
+              }
+            }
+          }
+        }
+      }
+      return { steps, pairsDone };
+    }
+
+    // ---------- Render / DOM ----------
+    const elInput = document.getElementById('input');
+    const elTarget = document.getElementById('targetPairs');
+    const elBtnSelect = document.getElementById('btnSelect');
+    const elBtnPlan = document.getElementById('btnPlan');
+    const elUse = document.getElementById('useList');
+    const elDiscard = document.getElementById('discardList');
+    const elZoneX = document.getElementById('zoneX');
+    const elZoneZ = document.getElementById('zoneZ');
+    const elZoneY = document.getElementById('zoneY');
+    const elSteps = document.getElementById('steps');
+    const elProgress = document.getElementById('progress');
+    const elKpi = document.getElementById('kpi');
+    const overlay = document.getElementById('overlay');
+    const btnPlay = document.getElementById('btnPlay');
+    const btnPause = document.getElementById('btnPause');
+    const btnStep = document.getElementById('btnStep');
+    const btnReset = document.getElementById('btnReset');
+
+    // Prefill con tu set de ejemplo (ya horizontalizado)
+    elInput.value =
+`X1: 93,93,96,94,94,96
+X2: 112,108,40,112,106,105
+X3: 129,120,6,5,5,119
+X4: 101,143,68,52,55,59
+X5: 29,29,28,28,27
+X6: 128,59,63,63,66,66
+X7: 205,218,218,204,213,213
+X8: 123,17,14,16,14,13
+X9: 16,53,115,37,84,83
+X10: 106,6,142,120,142
+X11: 1,57,119,109,19,13
+X12: 58,133,53,57,58,49
+X13: 23,23,25,25,127,127
+X14: 39,108,128,70,82
+X15: 138
+X16: 207,153,158,156,157,156
+X17: 134,132,132,73,73,133
+X18: 21,26,26,21
+X19: 143,22,35,122,138
+X20: 102,101,86,102,84
+X21: 87,31,68,67,55,67,52`;
+
+    let pilesAll = [];
+    let selection = null;
+    let plan = null;
+
+    let zoneX=[], zoneZ=[], zoneY=[];
+    let playing=false, stepIdx=0, timer=null;
+
+    function renderStack(p){ return `
+      <div class="stack" id="pile-${p.id}">
+        <div class="stack-h">
+          <span>${p.id}</span>
+          <span class="badge">${p.items.length}</span>
+        </div>
+        <div class="stack-body">
+          ${p.items.map((v,i)=>`<div class="box" data-pile="${p.id}" data-idx="${i}" data-val="${v}">${v}</div>`).join('')}
+        </div>
+      </div>`; }
+
+    function renderZones(){
+      elZoneX.innerHTML = zoneX.map(renderStack).join('');
+      elZoneZ.innerHTML = zoneZ.map(renderStack).join('');
+      elZoneY.innerHTML = zoneY.map(renderStack).join('');
+    }
+    function renderLists(){
+      elUse.innerHTML = selection ? selection.selected.map(p=>`<span class="chip">${p.id}</span>`).join('') : '';
+      elDiscard.innerHTML = selection ? selection.discarded.map(p=>`<span class="chip" style="background:#fff1f2;border-color:#ffe4e6;color:#be123c;">${p.id}</span>`).join('') : '';
+    }
+    function renderSteps(){
+      if(!plan){ elSteps.innerHTML=''; return; }
+      elSteps.innerHTML = plan.steps.map((s,i)=> {
+        if(s.action==='markY') return `<li>Marcar <b>${s.from}</b> → <b>${s.to}</b> <span class="muted">(${s.note||''})</span></li>`;
+        if(s.action==='open') return `<li>Abrir <b>${s.id}</b></li>`;
+        if(s.action==='move') return `<li>Mover <b>${s.count}</b> (top) de <b>${s.from}</b> → <b>${s.to}</b> <span class="muted">(${s.note||''})</span></li>`;
+        return `<li>${JSON.stringify(s)}</li>`;
+      }).join('');
+    }
+    function setProgress(){
+      const total = plan ? plan.steps.length : 0;
+      elProgress.textContent = plan ? `Paso ${Math.min(stepIdx,total)}/${total}` : '';
+    }
+
+    // Helpers para zonas
+    function cloneStateFromSelection(){
+      const base = (selection?.selected ?? pilesAll).map(p=>({ id:p.id, items:[...p.items] }));
+      zoneX = base; zoneZ=[]; zoneY=[];
+      renderZones();
+    }
+    function findPile(id){
+      for(const list of [zoneX, zoneZ, zoneY]){
+        const p = list.find(pp=>pp.id===id);
+        if(p) return { p, list };
+      }
+      return null;
+    }
+
+    // ---------- Animación (clones) ----------
+    function bbox(el){ const r=el.getBoundingClientRect(); return {x:r.left, y:r.top, w:r.width, h:r.height}; }
+    function animateMoveBoxes(fromId, toId, k=1, onDone){
+      const fromPile = document.querySelector(`#pile-${CSS.escape(fromId)} .stack-body`);
+      const toPile = document.querySelector(`#pile-${CSS.escape(toId)} .stack-body`);
+      if(!fromPile || !toPile){ onDone&&onDone(); return; }
+
+      const boxes = Array.from(fromPile.querySelectorAll('.box')).slice(-k); // top are the last rendered (column-reverse)
+      if(boxes.length===0){ onDone&&onDone(); return; }
+
+      const clones=[];
+      const destRect = bbox(toPile);
+      const boxH = boxes[0].getBoundingClientRect().height + 6; // approx gap
+      const startOffset = toPile.childElementCount * boxH;
+
+      boxes.forEach((b,idx)=>{
+        const r=bbox(b);
+        const c=document.createElement('div');
+        c.className='clone';
+        c.style.left=r.x+'px'; c.style.top=r.y+'px'; c.style.width=r.w+'px'; c.style.height=r.h+'px';
+        c.textContent = b.dataset.val;
+        overlay.appendChild(c);
+        clones.push({c, r});
+        // highlight source
+        const pileEl = document.getElementById('pile-'+fromId);
+        pileEl && pileEl.classList.add('highlight');
+        setTimeout(()=>pileEl && pileEl.classList.remove('highlight'), 400);
+      });
+
+      // target stacked position (moving near the top of destination body)
+      clones.forEach((o,idx)=>{
+        const dx = destRect.x - o.r.x;
+        const dy = (destRect.y + startOffset + idx*boxH) - o.r.y;
+        requestAnimationFrame(()=>{
+          o.c.style.transform=`translate(${dx}px, ${dy}px)`;
+        });
+      });
+
+      setTimeout(()=>{
+        clones.forEach(o=>o.c.remove());
+        // highlight dest
+        const dst = document.getElementById('pile-'+toId);
+        dst && (dst.classList.add('highlight'), setTimeout(()=>dst.classList.remove('highlight'), 400));
+        onDone && onDone();
+      }, 650);
+    }
+
+    function animateMarkYPile(fromId, toId, onDone){
+      const el = document.getElementById('pile-'+fromId);
+      if(!el){ onDone&&onDone(); return; }
+      el.classList.add('highlight');
+      setTimeout(()=>el.classList.remove('highlight'), 500);
+      // simple fade slide illusion
+      setTimeout(onDone, 300);
+    }
+
+    // ---------- Aplicar pasos ----------
+    function applyStep(step, cb){
+      if(!step){ cb&&cb(); return; }
+      if(step.action==='open'){
+        if(step.id.startsWith('Y')){ zoneY.unshift({ id:step.id, items:[] }); renderZones(); }
+        else if(step.id.startsWith('Z')){ zoneZ.unshift({ id:step.id, items:[] }); renderZones(); }
+        cb&&cb(); return;
+      }
+      if(step.action==='markY'){
+        // mover pila completa X→Y
+        const src = findPile(step.from);
+        if(!src){ cb&&cb(); return; }
+        animateMarkYPile(step.from, step.to, ()=>{
+          // remover de X, agregar a Y
+          src.list.splice(src.list.indexOf(src.p),1);
+          zoneY.unshift({ id:step.to, items:[...src.p.items] });
+          renderZones(); cb&&cb();
+        });
+        return;
+      }
+      if(step.action==='move'){
+        // mover k cajas del tope de from → to
+        const src = findPile(step.from);
+        const dst = findPile(step.to);
+        if(!src || !dst){ cb&&cb(); return; }
+        const k = step.count;
+        animateMoveBoxes(step.from, step.to, k, ()=>{
+          const group = src.p.items.splice(-k); // top are last (because render column-reverse)
+          dst.p.items.push(...group.reverse());
+          renderZones(); cb&&cb();
+        });
+        return;
+      }
+      cb&&cb();
+    }
+
+    function playTick(){
+      if(!plan){ playing=false; return; }
+      if(stepIdx>=plan.steps.length){ playing=false; setProgress(); return; }
+      const s = plan.steps[stepIdx];
+      applyStep(s, ()=>{
+        stepIdx++; setProgress();
+        if(playing){ timer = setTimeout(playTick, 500); }
+      });
+    }
+
+    // ---------- Eventos ----------
+    elBtnSelect.onclick = ()=>{
+      pilesAll = parseInput(elInput.value);
+      const target = Math.max(1, Number(elTarget.value)||22);
+      selection = autoSelectPilesForPairs(pilesAll, target);
+      elKpi.textContent = `Estimación de pares en selección: ${selection.selected.reduce((a,p)=>a+pairsInArray(p.items),0)} / meta ${target}`;
+      renderLists();
+      cloneStateFromSelection();
+      elSteps.innerHTML=''; plan=null; stepIdx=0; setProgress();
+    };
+
+    elBtnPlan.onclick = ()=>{
+      if(!selection){ // si no se seleccionó aún, usar todo
+        pilesAll = parseInput(elInput.value);
+        selection = autoSelectPilesForPairs(pilesAll, Math.max(1, Number(elTarget.value)||22));
+        renderLists();
+        cloneStateFromSelection();
+      }
+      const target = Math.max(1, Number(elTarget.value)||22);
+      plan = planMoves(selection.selected, target);
+      renderSteps(); stepIdx=0; setProgress();
+    };
+
+    btnPlay.onclick = ()=>{
+      if(!plan) return;
+      if(stepIdx>=plan.steps.length){ stepIdx=0; cloneStateFromSelection(); setProgress(); }
+      playing=true; clearTimeout(timer); playTick();
+    };
+    btnPause.onclick = ()=>{ playing=false; clearTimeout(timer); };
+    btnStep.onclick = ()=>{
+      if(!plan) return;
+      playing=false; clearTimeout(timer);
+      if(stepIdx>=plan.steps.length) return;
+      applyStep(plan.steps[stepIdx], ()=>{ stepIdx++; setProgress(); });
+    };
+    btnReset.onclick = ()=>{
+      playing=false; clearTimeout(timer);
+      stepIdx=0; cloneStateFromSelection(); setProgress();
+    };
+
+    // Render inicial (con selección automática rápida)
+    (function init(){
+      pilesAll = parseInput(elInput.value);
+      selection = autoSelectPilesForPairs(pilesAll, Math.max(1, Number(elTarget.value)||22));
+      elKpi.textContent = `Estimación de pares en selección: ${selection.selected.reduce((a,p)=>a+pairsInArray(p.items),0)} / meta ${Number(elTarget.value)||22}`;
+      renderLists();
+      cloneStateFromSelection();
+    })();
+  </script>
 </body>
 </html>
