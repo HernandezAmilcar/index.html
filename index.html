@@ -192,7 +192,7 @@
       return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
     }
 
-    // Plan de movimientos (top-first, grupos 2-3, sin tocar organizadas)
+    // Plan de movimientos (top-first, grupos 2-3, usando X y Z como fuentes)
     function planMoves(sourcePiles, targetPairs, maxZ=8){
       const steps=[]; const Y=[]; const Z=[]; const X=sourcePiles.map(p=>({ id:p.id, items:[...p.items] }));
       let yCounter=1, zCounter=0, pairsDone=0;
@@ -207,16 +207,21 @@
         if(isOrganizedPile(p.items) && pairsDone<targetPairs){ markY(p); pairsDone+=pairsInArray(p.items); }
       }
 
-      // 2) construcción de Y
       function getY(){ let y=Y.find(yy=>yy.items.length<6); if(!y){ y=openY(); } return y; }
       const scoreTop=(p)=>{ const top=p.items.slice(0,3); const m=countMap(top); let s=0; for(const c of m.values()) s=Math.max(s,c); return s + pairsInArray(p.items)*0.1; };
 
+      // 2) Construcción con candidatos de X **y** Z
       while(pairsDone<targetPairs){
-        const cands = X.filter(p=>p.items.length>0 && !isOrganizedPile(p.items));
+        // candidatos: todas las pilas en X y Z con material útil
+        const cands = [...X, ...Z].filter(p=>p.items.length>0 && !isOrganizedPile(p.items));
         if(cands.length===0) break;
         cands.sort((a,b)=>scoreTop(b)-scoreTop(a));
-        const src=cands[0]; const y=getY();
+
+        const src=cands[0];
+        const y=getY();
         let moved=false;
+
+        // Intento directo src→Y
         for(const k of [3,2]){
           if(src.items.length>=k && y.items.length+k<=6){
             const before=pairsInArray(y.items);
@@ -227,22 +232,39 @@
             }
           }
         }
+
         if(!moved){
-          if(Z.length<maxZ && src.items.length>0){
-            const z=openZ(); const k=Math.min(3, src.items.length, 6-z.items.length);
-            if(k>0) move(k, src, z, 'Parqueo temporal en Z');
-          } else {
-            const alt=cands[1];
-            if(!alt) break;
+          // Intento con donante alterno (otro X o Z)
+          const alt = cands.find(p=>p!==src);
+          if(alt){
             for(const k of [3,2]){
               if(alt.items.length>=k && y.items.length+k<=6){
                 const before=pairsInArray(y.items);
                 const tentative=[...y.items, ...alt.items.slice(0,k)];
                 if(pairsInArray(tentative)>=before){
                   move(k, alt, y, 'Alternativa directa');
-                  const after=pairsInArray(y.items); pairsDone+=Math.max(0, after-before); break;
+                  const after=pairsInArray(y.items); pairsDone+=Math.max(0, after-before); moved=true; break;
                 }
               }
+            }
+          }
+        }
+
+        if(!moved){
+          // Si no mejora directo y hay que destrabar, aparco src en Z
+          if(Z.length<maxZ && src.items.length>0){
+            const z=openZ();
+            const k=Math.min(3, src.items.length, 6-z.items.length);
+            if(k>0) move(k, src, z, 'Parqueo temporal en Z');
+          } else {
+            // Último intento: aparcar alt en Z si existe
+            const alt2 = cands.find(p=>p!==src && p.items.length>0);
+            if(alt2 && Z.length<maxZ){
+              const z=openZ();
+              const k=Math.min(3, alt2.items.length, 6-z.items.length);
+              if(k>0) move(k, alt2, z, 'Parqueo temporal (alt) en Z');
+            } else {
+              break; // sin opciones
             }
           }
         }
@@ -469,19 +491,19 @@ X21: 87,31,68,67,55,67,52`;
       renderSteps(); stepIdx=0; setProgress();
     };
 
-    elBtnPlay.onclick = ()=>{
+    btnPlay.onclick = ()=>{
       if(!plan) return;
       if(stepIdx>=plan.steps.length){ stepIdx=0; cloneStateFromSelection(); setProgress(); }
       playing=true; clearTimeout(timer); playTick();
     };
-    elBtnPause.onclick = ()=>{ playing=false; clearTimeout(timer); };
-    elBtnStep.onclick = ()=>{
+    btnPause.onclick = ()=>{ playing=false; clearTimeout(timer); };
+    btnStep.onclick = ()=>{
       if(!plan) return;
       playing=false; clearTimeout(timer);
       if(stepIdx>=plan.steps.length) return;
       applyStep(plan.steps[stepIdx], ()=>{ stepIdx++; setProgress(); });
     };
-    elBtnReset.onclick = ()=>{
+    btnReset.onclick = ()=>{
       playing=false; clearTimeout(timer);
       stepIdx=0; cloneStateFromSelection(); setProgress();
     };
