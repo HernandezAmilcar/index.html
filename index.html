@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>Simulador X→Z→Y (pares, movimiento mínimo)</title>
+  <title>Simulador X→Z→Y (pares · movimiento mínimo)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -17,7 +17,7 @@
     .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
     .grid-3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:16px; }
     .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-    textarea { width:100%; height:190px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:13px; padding:10px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    textarea { width:100%; height:190px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:13px; padding:10px; border:1px solid var(--line); border-radius:12px; background:#fff; }
     input[type="number"]{ width:110px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; }
     .btn { padding:8px 12px; border-radius:999px; border:0; cursor:pointer; font-weight:600; }
     .btn.primary { background:#111827; color:#fff; }
@@ -28,13 +28,13 @@
 
     /* Zonas y pilas */
     .zone-title { font-weight:700; font-size:14px; margin-bottom:8px; }
-    .zone { min-height:180px; display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+    .zone { min-height:180px; display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; }
     .zone.x { border-color:#cbd5e1; }
     .zone.z { border-color:#fbbf24; }
     .zone.y { border-color:#34d399; }
     .stack { border:1px solid var(--line); border-radius:14px; padding:10px; background:#fff; min-width:120px; max-width:140px; }
     .stack-h { font-size:12px; font-weight:700; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }
-    .stack-body { display:flex; flex-direction:column-reverse; gap:6px; min-height:24px; }
+    .stack-body { display:flex; flex-direction:column; gap:6px; min-height:24px; } /* TOPE ARRIBA */
     .box { padding:6px 8px; font-size:12px; text-align:center; background:#f1f5f9; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 1px 0 rgba(0,0,0,.03); }
     .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
 
@@ -112,7 +112,7 @@
         if(!m) continue;
         const id = m[1].toUpperCase();
         const items = m[2].split(/[\s,]+/).map(x=>x.trim()).filter(Boolean).map(Number).filter(x=>!Number.isNaN(x));
-        piles.push({ id, items: items });
+        piles.push({ id, items: items }); // items: [TOP,...]
       }
       return piles;
     }
@@ -159,7 +159,7 @@
       return { groups, usedIds:used };
     }
 
-    // Selección automática por meta de pares (sin que el usuario escoja)
+    // Selección automática por meta de pares
     function autoSelectPilesForPairs(piles, targetPairs){
       const organized = piles.filter(p=>isOrganizedPile(p.items));
       const disorganized = piles.filter(p=>!isOrganizedPile(p.items));
@@ -184,7 +184,7 @@
       }
       if(pairsAccum>=targetPairs) return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
 
-      // 3) Potencial de pares interno
+      // 3) Potencial interno
       const rest = disorganized.filter(p=>!usedComp.has(p.id));
       rest.sort((a,b)=>pairsInArray(b.items)-pairsInArray(a.items));
       for(const p of rest){ if(pairsAccum>=targetPairs) break; selected.push(p); pairsAccum+=pairsInArray(p.items); }
@@ -192,7 +192,7 @@
       return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
     }
 
-    // Plan de movimientos (heurística mínima)
+    // Plan de movimientos (top-first, grupos 2-3, sin tocar organizadas)
     function planMoves(sourcePiles, targetPairs, maxZ=8){
       const steps=[]; const Y=[]; const Z=[]; const X=sourcePiles.map(p=>({ id:p.id, items:[...p.items] }));
       let yCounter=1, zCounter=0, pairsDone=0;
@@ -200,7 +200,7 @@
       function openZ(){ const id=`Z${++zCounter}`; Z.push({id, items:[]}); steps.push({action:'open', id}); return Z[Z.length-1]; }
       function openY(){ const id=`Y${yCounter++}`; Y.push({id, items:[]}); steps.push({action:'open', id}); return Y[Y.length-1]; }
       function markY(p){ const id=`Y${yCounter++}`; Y.push({id, items:[...p.items]}); steps.push({action:'markY', from:p.id, to:id, note:'Directo: pila ya organizada'}); }
-      function move(k, from, to, note){ const g=from.items.splice(0,k); to.items.unshift(...g.reverse()); steps.push({action:'move', count:k, from:from.id, to:to.id, note}); }
+      function move(k, from, to, note){ const g=from.items.splice(0,k); to.items = [...g, ...to.items]; steps.push({action:'move', count:k, from:from.id, to:to.id, note}); }
 
       // 1) Y directas
       for(const p of X){
@@ -355,15 +355,15 @@ X21: 87,31,68,67,55,67,52`;
       const toPile = document.querySelector(`#pile-${CSS.escape(toId)} .stack-body`);
       if(!fromPile || !toPile){ onDone&&onDone(); return; }
 
-      const boxes = Array.from(fromPile.querySelectorAll('.box')).slice(-k); // top are the last rendered (column-reverse)
+      const boxes = Array.from(fromPile.querySelectorAll('.box')).slice(0, k); // TOP = primeros k
       if(boxes.length===0){ onDone&&onDone(); return; }
 
       const clones=[];
       const destRect = bbox(toPile);
-      const boxH = boxes[0].getBoundingClientRect().height + 6; // approx gap
-      const startOffset = toPile.childElementCount * boxH;
+      const boxH = boxes[0].getBoundingClientRect().height + 6; // gap aproximado
+      const startOffset = 0; // entran por arriba
 
-      boxes.forEach((b,idx)=>{
+      boxes.forEach((b)=>{
         const r=bbox(b);
         const c=document.createElement('div');
         c.className='clone';
@@ -371,24 +371,19 @@ X21: 87,31,68,67,55,67,52`;
         c.textContent = b.dataset.val;
         overlay.appendChild(c);
         clones.push({c, r});
-        // highlight source
         const pileEl = document.getElementById('pile-'+fromId);
         pileEl && pileEl.classList.add('highlight');
         setTimeout(()=>pileEl && pileEl.classList.remove('highlight'), 400);
       });
 
-      // target stacked position (moving near the top of destination body)
       clones.forEach((o,idx)=>{
         const dx = destRect.x - o.r.x;
         const dy = (destRect.y + startOffset + idx*boxH) - o.r.y;
-        requestAnimationFrame(()=>{
-          o.c.style.transform=`translate(${dx}px, ${dy}px)`;
-        });
+        requestAnimationFrame(()=>{ o.c.style.transform=`translate(${dx}px, ${dy}px)`; });
       });
 
       setTimeout(()=>{
         clones.forEach(o=>o.c.remove());
-        // highlight dest
         const dst = document.getElementById('pile-'+toId);
         dst && (dst.classList.add('highlight'), setTimeout(()=>dst.classList.remove('highlight'), 400));
         onDone && onDone();
@@ -400,11 +395,10 @@ X21: 87,31,68,67,55,67,52`;
       if(!el){ onDone&&onDone(); return; }
       el.classList.add('highlight');
       setTimeout(()=>el.classList.remove('highlight'), 500);
-      // simple fade slide illusion
       setTimeout(onDone, 300);
     }
 
-    // ---------- Aplicar pasos ----------
+    // ---------- Aplicar pasos a estado + animación ----------
     function applyStep(step, cb){
       if(!step){ cb&&cb(); return; }
       if(step.action==='open'){
@@ -413,26 +407,23 @@ X21: 87,31,68,67,55,67,52`;
         cb&&cb(); return;
       }
       if(step.action==='markY'){
-        // mover pila completa X→Y
         const src = findPile(step.from);
         if(!src){ cb&&cb(); return; }
         animateMarkYPile(step.from, step.to, ()=>{
-          // remover de X, agregar a Y
           src.list.splice(src.list.indexOf(src.p),1);
-          zoneY.unshift({ id:step.to, items:[...src.p.items] });
+          zoneY.unshift({ id:step.to, items:[...src.p.items] }); // MISMO ORDEN
           renderZones(); cb&&cb();
         });
         return;
       }
       if(step.action==='move'){
-        // mover k cajas del tope de from → to
         const src = findPile(step.from);
         const dst = findPile(step.to);
         if(!src || !dst){ cb&&cb(); return; }
         const k = step.count;
         animateMoveBoxes(step.from, step.to, k, ()=>{
-          const group = src.p.items.splice(-k); // top are last (because render column-reverse)
-          dst.p.items.push(...group.reverse());
+          const group = src.p.items.splice(0, k);              // quitar TOP
+          dst.p.items = [...group, ...dst.p.items];            // poner ARRIBA sin invertir
           renderZones(); cb&&cb();
         });
         return;
@@ -451,6 +442,11 @@ X21: 87,31,68,67,55,67,52`;
     }
 
     // ---------- Eventos ----------
+    const elBtnPlay = document.getElementById('btnPlay');
+    const elBtnPause = document.getElementById('btnPause');
+    const elBtnStep = document.getElementById('btnStep');
+    const elBtnReset = document.getElementById('btnReset');
+
     elBtnSelect.onclick = ()=>{
       pilesAll = parseInput(elInput.value);
       const target = Math.max(1, Number(elTarget.value)||22);
@@ -473,19 +469,19 @@ X21: 87,31,68,67,55,67,52`;
       renderSteps(); stepIdx=0; setProgress();
     };
 
-    btnPlay.onclick = ()=>{
+    elBtnPlay.onclick = ()=>{
       if(!plan) return;
       if(stepIdx>=plan.steps.length){ stepIdx=0; cloneStateFromSelection(); setProgress(); }
       playing=true; clearTimeout(timer); playTick();
     };
-    btnPause.onclick = ()=>{ playing=false; clearTimeout(timer); };
-    btnStep.onclick = ()=>{
+    elBtnPause.onclick = ()=>{ playing=false; clearTimeout(timer); };
+    elBtnStep.onclick = ()=>{
       if(!plan) return;
       playing=false; clearTimeout(timer);
       if(stepIdx>=plan.steps.length) return;
       applyStep(plan.steps[stepIdx], ()=>{ stepIdx++; setProgress(); });
     };
-    btnReset.onclick = ()=>{
+    elBtnReset.onclick = ()=>{
       playing=false; clearTimeout(timer);
       stepIdx=0; cloneStateFromSelection(); setProgress();
     };
