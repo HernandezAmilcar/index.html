@@ -6,6 +6,9 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lucide@latest"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- jsPDF + autoTable para PDF -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <style>
 .scroll-shadow{-webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,1),rgba(0,0,0,1) 90%,rgba(0,0,0,0));mask-image:linear-gradient(to bottom,rgba(0,0,0,1),rgba(0,0,0,1) 90%,rgba(0,0,0,0))}
 .modal-backdrop{background:rgba(0,0,0,.45)} .focus-ring:focus{outline:2px solid #2563eb;outline-offset:2px}
@@ -13,19 +16,24 @@
 </head>
 <body class="bg-gray-50 text-gray-900">
 <header class="px-4 sm:px-6 lg:px-8 py-4 border-b bg-white">
-  <div class="flex items-center justify-between gap-3">
+  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h1 class="text-xl sm:text-2xl font-semibold">Rooms Kanban — Deliveries Control</h1>
       <p id="dataBadge" class="text-xs text-gray-500 mt-1"></p>
     </div>
-    <div class="flex items-center gap-2">
-      <button id="btnExport" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Export JSON</button>
+    <div class="flex items-center gap-2 flex-wrap">
+      <button id="btnExportState" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Export JSON</button>
       <label class="px-3 py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm cursor-pointer">
         <input id="fileExcel" type="file" accept=".xlsx,.xls,.csv" class="hidden"> Import Excel / CSV
       </label>
       <button id="btnReset" class="px-3 py-2 rounded-xl bg-red-50 text-red-700 hover:bg-red-100 text-sm">Reset (estados)</button>
+
+      <!-- NUEVO: Exportar Reporte (Excel/PDF) por fecha/rango -->
+      <button id="btnOpenReport" class="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm">Export Report (Excel / PDF)</button>
     </div>
   </div>
+
+  <!-- Filtros -->
   <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
     <div><label class="text-xs font-medium">Floor</label>
       <select id="filterFloor" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"><option value="">All floors</option></select>
@@ -48,7 +56,7 @@
   <div id="kanban" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"></div>
 </main>
 
-<!-- Modal -->
+<!-- Modal Room -->
 <div id="roomModal" class="fixed inset-0 hidden items-start justify-center p-4 modal-backdrop z-50">
   <div class="w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden">
     <div class="flex items-center justify-between px-5 py-4 border-b">
@@ -85,15 +93,51 @@
   </div>
 </div>
 
+<!-- Modal Reporte -->
+<div id="reportModal" class="fixed inset-0 hidden items-center justify-center p-4 modal-backdrop z-50">
+  <div class="w-full max-w-xl bg-white rounded-2xl shadow-xl overflow-hidden">
+    <div class="px-5 py-4 border-b flex items-center justify-between">
+      <h2 class="text-lg font-semibold">Export Delivery Log</h2>
+      <button id="reportClose" class="p-2 rounded-xl hover:bg-gray-100" aria-label="Close"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <div class="px-5 py-4 space-y-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-medium">Start date</label>
+          <input type="date" id="repStart" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
+        </div>
+        <div>
+          <label class="text-xs font-medium">End date</label>
+          <input type="date" id="repEnd" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
+        </div>
+      </div>
+      <p class="text-xs text-gray-600">Si seleccionas solo una fecha, el reporte será de ese día.</p>
+      <div class="flex items-center gap-2">
+        <button id="btnExportXLSX" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-sm">Export to Excel</button>
+        <button id="btnExportPDF" class="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 text-sm">Export to PDF</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const STORAGE_KEY='moorDeliveryV1';
 let DATA={rooms:[],team:[]};
+// STATE.delivery mantiene items marcados; STATE.logs mantiene bitácora por ítem
 let STATE=loadState();
-const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
-const fmtDate=ts=>new Date(ts).toLocaleString();
 
-function loadState(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||{delivery:{}}}catch(e){return{delivery:{}}}}
-function saveState(){localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));}
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+const fmtDateTime=ts=>new Date(ts).toLocaleString();
+const fmtDate=(ts)=> new Date(ts).toISOString().slice(0,10);
+
+function loadState(){
+  try{
+    const v = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {delivery:{}, logs:[]};
+    if(!v.logs) v.logs = []; // back-compat
+    return v;
+  }catch(e){ return {delivery:{}, logs:[]}; }
+}
+function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); }
 
 function statusForRoom(room){
   const d=STATE.delivery[room.room]?.items||{};
@@ -113,10 +157,8 @@ function buildFilters(){
   filterEls.floor.innerHTML='<option value="">All floors</option>'+floors.map(f=>`<option value="${f}">${f}</option>`).join('');
   const types=unique(DATA.rooms.map(r=>r.type)).sort();
   filterEls.type.innerHTML='<option value="">All types</option>'+types.map(t=>`<option value="${t}">${t}</option>`).join('');
-  // Badge resumen
   const rooms=DATA.rooms.length, items=DATA.rooms.reduce((s,r)=>s+r.items.length,0);
-  const fltxt=floors.join(', ');
-  $('#dataBadge').textContent = rooms? `${rooms} rooms • Floors: ${fltxt} • Items rows: ${items}` : 'Load rooms_data.json or use Import Excel';
+  $('#dataBadge').textContent = rooms? `${rooms} rooms • Floors: ${floors.join(', ')} • Items rows: ${items}` : 'Load rooms_data.json or use Import Excel';
 }
 function applyFilters(r){
   const fF=filterEls.floor.value, fR=filterEls.room.value.trim(), fT=filterEls.type.value, fS=filterEls.status.value;
@@ -149,6 +191,7 @@ function roomCard(r){const st=statusForRoom(r);return `<article class="room-card
 const modal=$('#roomModal');
 const md={title:$('#mdTitle'),subtitle:$('#mdSubtitle'),items:$('#mdItems'),status:$('#mdStatus'),progress:$('#mdProgress'),verifier:$('#mdVerifier'),addVerification:$('#mdAddVerification'),history:$('#mdHistory'),notes:$('#mdNotes'),saveNotes:$('#mdSaveNotes'),markAll:$('#mdMarkAll'),clearAll:$('#mdClearAll'),close:$('#mdClose')};
 let currentRoom=null;
+
 function openRoomModal(n){
   currentRoom=DATA.rooms.find(r=>String(r.room)===String(n)); if(!currentRoom) return;
   md.title.textContent=`Room ${currentRoom.room}`; md.subtitle.textContent=`Floor ${currentRoom.floor} • Type ${currentRoom.type}`;
@@ -161,14 +204,31 @@ function openRoomModal(n){
   renderHistory(); md.notes.value=STATE.delivery[currentRoom.room]?.notes||''; updateModalStatus();
   modal.classList.remove('hidden'); modal.classList.add('flex'); lucide.createIcons();
   $$('#mdItems input[type="checkbox"]').forEach(cb=>cb.addEventListener('change',()=>{
-    const key=cb.dataset.item; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''};
-    STATE.delivery[currentRoom.room].items[key]=cb.checked; saveState(); updateModalStatus(); renderKanban();
+    const key=cb.dataset.item;
+    STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''};
+    STATE.delivery[currentRoom.room].items[key]=cb.checked;
+    // NUEVO: log por ítem
+    const who = $('#mdVerifier').value || '—';
+    STATE.logs = STATE.logs || [];
+    const roomItm = currentRoom.items.find(x=>x.key===key);
+    STATE.logs.push({
+      room: currentRoom.room,
+      floor: currentRoom.floor,
+      type: currentRoom.type,
+      itemKey: key,
+      itemName: roomItm ? roomItm.name : key,
+      qty: roomItm ? roomItm.qty : 1,
+      by: who,
+      ts: Date.now(),
+      action: cb.checked ? 'delivered' : 'cleared'
+    });
+    saveState(); updateModalStatus(); renderKanban();
   }));
 }
 function closeRoomModal(){modal.classList.add('hidden'); modal.classList.remove('flex'); currentRoom=null;}
 function updateModalStatus(){if(!currentRoom) return;const st=statusForRoom(currentRoom); md.status.innerHTML=badge(st);
   const d=STATE.delivery[currentRoom.room]?.items||{}; const del=currentRoom.items.filter(it=>d[it.key]).length; md.progress.textContent=`${del}/${currentRoom.items.length} delivered`;}
-function renderHistory(){const h=STATE.delivery[currentRoom.room]?.history||[]; md.history.innerHTML=h.length?h.slice().reverse().map(x=>`<div class="text-sm"><span class="font-medium">${x.by}</span> • <span class="text-gray-500">${new Date(x.ts).toLocaleString()}</span></div>`).join(''):`<div class="text-gray-500 text-sm">No entries yet.</div>`;}
+function renderHistory(){const h=STATE.delivery[currentRoom.room]?.history||[]; md.history.innerHTML=h.length?h.slice().reverse().map(x=>`<div class="text-sm"><span class="font-medium">${x.by}</span> • <span class="text-gray-500">${fmtDateTime(x.ts)}</span></div>`).join(''):`<div class="text-gray-500 text-sm">No entries yet.</div>`;}
 
 async function parseWorkbook(wb){
   let rows=[]; wb.SheetNames.forEach(n=>{ rows=rows.concat(XLSX.utils.sheet_to_json(wb.Sheets[n],{defval:''})); });
@@ -195,35 +255,190 @@ async function parseWorkbook(wb){
 
 // Filtros
 Object.values(filterEls).forEach(el=>el.addEventListener('input',renderKanban));
+
 // Import Excel
 document.getElementById('fileExcel').addEventListener('change', async e=>{
   const f=e.target.files?.[0]; if(!f) return; const ab=await f.arrayBuffer(); const wb=XLSX.read(ab,{type:'array'}); await parseWorkbook(wb);
   DATA.team = DATA.team.length? DATA.team : ['Amilcar Hernandez','Milka Hernandez','Paul Team','Warehouse Crew'];
   buildFilters(); renderKanban();
 });
-// Export/Reset
-document.getElementById('btnExport').addEventListener('click',()=>{const payload={DATA,STATE}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms-deliveries.json'; a.click(); URL.revokeObjectURL(a.href);});
-document.getElementById('btnReset').addEventListener('click',()=>{if(!confirm('Clear all delivery states, history and notes?'))return; STATE={delivery:{}}; saveState(); renderKanban(); if(currentRoom) openRoomModal(currentRoom.room);});
-// Modal acciones
-document.getElementById('mdClose').addEventListener('click',()=>{closeRoomModal()});
-document.getElementById('roomModal').addEventListener('click',e=>{if(e.target===document.getElementById('roomModal')) closeRoomModal();});
-document.getElementById('mdAddVerification').addEventListener('click',()=>{if(!currentRoom) return; const by=document.getElementById('mdVerifier').value||'—'; const ts=Date.now(); STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; STATE.delivery[currentRoom.room].history.push({by,ts}); saveState(); renderHistory();});
-document.getElementById('mdSaveNotes').addEventListener('click',()=>{if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; STATE.delivery[currentRoom.room].notes=document.getElementById('mdNotes').value||''; saveState(); alert('Notes saved');});
-document.getElementById('mdMarkAll').addEventListener('click',()=>{if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; currentRoom.items.forEach(it=>STATE.delivery[currentRoom.room].items[it.key]=true); saveState(); updateModalStatus(); renderKanban(); openRoomModal(currentRoom.room);});
-document.getElementById('mdClearAll').addEventListener('click',()=>{if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; currentRoom.items.forEach(it=>STATE.delivery[currentRoom.room].items[it.key]=false); saveState(); updateModalStatus(); renderKanban(); openRoomModal(currentRoom.room);});
 
-// Boot: carga rooms_data.json (tu Excel ya convertido con TODOS los pisos/cuartos/ítems)
+// Export JSON estado
+document.getElementById('btnExportState').addEventListener('click',()=>{
+  const payload={DATA,STATE}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms-deliveries.json'; a.click(); URL.revokeObjectURL(a.href);
+});
+
+// Reset
+document.getElementById('btnReset').addEventListener('click',()=>{
+  if(!confirm('Clear all delivery states, history and notes?'))return;
+  STATE={delivery:{}, logs:[]}; saveState(); renderKanban(); if(currentRoom) openRoomModal(currentRoom.room);
+});
+
+// Report modal
+const reportModal = $('#reportModal');
+$('#btnOpenReport').addEventListener('click',()=>{ reportModal.classList.remove('hidden'); reportModal.classList.add('flex'); lucide.createIcons(); });
+$('#reportClose').addEventListener('click',()=>{ reportModal.classList.add('hidden'); reportModal.classList.remove('flex'); });
+
+// Boot: cargar JSON inicial si existe
 async function boot(){
   try{
     const res=await fetch('rooms_data.json',{cache:'no-store'});
-    if(res.ok){
-      const raw=await res.json();
-      DATA.rooms=raw.rooms||[]; DATA.team=raw.team||[];
-    }
-  }catch(e){console.warn('rooms_data.json no encontrado. Usa Import Excel.');}
+    if(res.ok){ const raw=await res.json(); DATA.rooms=raw.rooms||[]; DATA.team=raw.team||[]; }
+  }catch(e){ /* ok */ }
   buildFilters(); renderKanban(); lucide.createIcons();
 }
 boot();
+
+/* ----------------- UTILIDADES DE REPORTE ----------------- */
+function normalizeRange(){
+  const s = $('#repStart').value; const e = $('#repEnd').value;
+  if(!s && !e) return null;
+  const start = s ? new Date(s+'T00:00:00') : new Date('1970-01-01T00:00:00');
+  const end   = e ? new Date(e+'T23:59:59') : new Date('2999-12-31T23:59:59');
+  return {start: start.getTime(), end: end.getTime()};
+}
+function logsInRange(range){
+  if(!STATE.logs || !STATE.logs.length) return [];
+  return STATE.logs.filter(l => l.action==='delivered' && l.ts>=range.start && l.ts<=range.end);
+}
+// Build report data grouped by floor/room
+function buildReport(range){
+  const logs = logsInRange(range);
+  // Map item qty by room+item (si hay múltiples eventos en el rango, sumamos qty entregada)
+  const key = (l)=> `${l.floor}|${l.room}`;
+  const byRoom = new Map();
+  logs.forEach(l=>{
+    if(!byRoom.has(key(l))) byRoom.set(key(l), {floor:l.floor, room:l.room, type:l.type, items:new Map()});
+    const R = byRoom.get(key(l));
+    const k = l.itemKey + ' — ' + l.itemName;
+    R.items.set(k, (R.items.get(k)||0) + (Number(l.qty)||0));
+  });
+
+  // Ordenar por piso y cuarto
+  const rows = Array.from(byRoom.values()).sort((a,b)=> a.floor===b.floor ? Number(a.room)-Number(b.room) : a.floor-b.floor);
+  return rows; // cada row: {floor,room,type, items: Map(itemDesc -> qty)}
+}
+
+/* ----------------- EXPORT EXCEL ----------------- */
+document.getElementById('btnExportXLSX').addEventListener('click',()=>{
+  const range = normalizeRange(); if(!range){ alert('Selecciona una fecha o rango.'); return; }
+  const data = buildReport(range);
+  if(data.length===0){ alert('No hay entregas en el rango seleccionado.'); return; }
+
+  const wb = XLSX.utils.book_new();
+
+  // Summary sheet
+  const summaryAOA = [['Delivery Summary', `From: ${new Date(range.start).toLocaleDateString()} To: ${new Date(range.end).toLocaleDateString()}`],[]];
+  const byFloor = {};
+  data.forEach(R=>{
+    const t = Array.from(R.items.values()).reduce((a,b)=>a+b,0);
+    byFloor[R.floor] = (byFloor[R.floor]||0) + t;
+  });
+  summaryAOA.push(['Floor','Total Items Delivered']);
+  Object.keys(byFloor).sort((a,b)=>Number(a)-Number(b)).forEach(f=>{
+    summaryAOA.push([Number(f), byFloor[f]]);
+  });
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryAOA);
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+  // One sheet per floor with details
+  const floors = unique(data.map(r=>r.floor)).sort((a,b)=>a-b);
+  floors.forEach(f=>{
+    const aoa = [['Floor', f],['Period', `${new Date(range.start).toLocaleDateString()} - ${new Date(range.end).toLocaleDateString()}`],[]];
+    aoa.push(['Room','Type','Item','Qty']);
+    data.filter(r=>r.floor===f).forEach(R=>{
+      const totalRoom = Array.from(R.items.values()).reduce((a,b)=>a+b,0);
+      Array.from(R.items.entries()).forEach(([item,qty])=>{
+        aoa.push([R.room, R.type, item, qty]);
+      });
+      aoa.push(['', '', 'Total for room', totalRoom]);
+      aoa.push([]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, `Floor ${f}`);
+  });
+
+  XLSX.writeFile(wb, `Delivery_Log_${new Date(range.start).toISOString().slice(0,10)}_${new Date(range.end).toISOString().slice(0,10)}.xlsx`);
+});
+
+/* ----------------- EXPORT PDF ----------------- */
+document.getElementById('btnExportPDF').addEventListener('click',()=>{
+  const range = normalizeRange(); if(!range){ alert('Selecciona una fecha o rango.'); return; }
+  const data = buildReport(range);
+  if(data.length===0){ alert('No hay entregas en el rango seleccionado.'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({orientation:'portrait', unit:'pt', format:'letter'});
+
+  const title = 'Delivery Log — Project Report';
+  const period = `From ${new Date(range.start).toLocaleDateString()} to ${new Date(range.end).toLocaleDateString()}`;
+  const intro = 'This report summarizes all delivered items within the selected period, organized by floor and room. The Project Manager certifies that the listed items were received complete and in good condition, as detailed below.';
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.text(title, 40, 50);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.text(period, 40, 68);
+  doc.setFontSize(11);
+  const splitIntro = doc.splitTextToSize(intro, 520);
+  doc.text(splitIntro, 40, 90);
+
+  // Por piso
+  const floors = unique(data.map(r=>r.floor)).sort((a,b)=>a-b);
+  let y = 120;
+  floors.forEach((f, idx)=>{
+    if(idx>0){ doc.addPage(); y=50; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text(`Floor ${f}`, 40, y);
+    y += 12;
+
+    // Construir tabla para autoTable: columnas Room | Type | Item | Qty
+    const rows = [];
+    let lastRoom = null, roomTotal = 0, floorTotal = 0;
+    data.filter(r=>r.floor===f).forEach(R=>{
+      roomTotal = 0;
+      Array.from(R.items.entries()).forEach(([item, qty])=>{
+        rows.push([R.room, R.type, item, qty]);
+        lastRoom = R.room; roomTotal += qty; floorTotal += qty;
+      });
+      rows.push(['', '', 'Total for room', roomTotal]);
+      rows.push(['','','','']);
+    });
+
+    doc.autoTable({
+      startY: y+6,
+      head: [['Room','Type','Item','Qty']],
+      body: rows,
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [30, 41, 59] }, // slate
+      margin: { left: 40, right: 40 },
+      theme: 'striped'
+    });
+
+    const endY = doc.lastAutoTable.finalY || (y+30);
+    doc.setFont('helvetica','bold'); doc.text(`Total items delivered on Floor ${f}: ${floorTotal}`, 40, endY + 20);
+  });
+
+  // Sección de firmas y notas al final del PDF
+  doc.addPage();
+  doc.setFont('helvetica','bold'); doc.setFontSize(12);
+  doc.text('Acknowledgement & Signatures', 40, 50);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  const cert = 'By signing below, the Project Manager acknowledges that the deliveries listed in this report were verified, received complete, and in good condition for the specified period.';
+  doc.text(doc.splitTextToSize(cert, 520), 40, 70);
+
+  // Notas
+  doc.setFont('helvetica','bold'); doc.text('Notes:', 40, 110);
+  doc.setDrawColor(180); doc.rect(40, 120, 520, 120); // caja para notas
+
+  // Firmas
+  const baseY = 260;
+  doc.setFont('helvetica','normal');
+  doc.line(60, baseY, 260, baseY);
+  doc.text('Delivered by (Name & Signature) — Date', 60, baseY+14);
+  doc.line(340, baseY, 540, baseY);
+  doc.text('Project Manager (Name & Signature) — Date', 340, baseY+14);
+
+  doc.save(`Delivery_Log_${new Date(range.start).toISOString().slice(0,10)}_${new Date(range.end).toISOString().slice(0,10)}.pdf`);
+});
 </script>
 </body>
 </html>
