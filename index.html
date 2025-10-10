@@ -3,535 +3,234 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Rooms Kanban – Deliveries Control</title>
-
-  <!-- Tailwind CSS (CDN) -->
+  <title>Rooms Kanban — Deliveries Control</title>
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
-
-  <!-- XLSX parser (SheetJS) to read your Excel in-browser -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
   <style>
-    /* Scroll shadows para columnas del kanban */
-    .scroll-shadow {
-      --mask: linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,1) 90%, rgba(0,0,0,0));
-      -webkit-mask-image: var(--mask);
-      mask-image: var(--mask);
-    }
-    /* Modal */
-    .modal-backdrop { background: rgba(0,0,0,0.45); }
-    /* Simple focus ring */
-    .focus-ring:focus { outline: 2px solid #2563eb; outline-offset: 2px; }
+    .scroll-shadow{-webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,1),rgba(0,0,0,1) 90%,rgba(0,0,0,0));mask-image:linear-gradient(to bottom,rgba(0,0,0,1),rgba(0,0,0,1) 90%,rgba(0,0,0,0))}
+    .modal-backdrop{background:rgba(0,0,0,.45)} .focus-ring:focus{outline:2px solid #2563eb;outline-offset:2px}
   </style>
 </head>
 <body class="bg-gray-50 text-gray-900">
-  <!-- Header -->
-  <header class="px-4 sm:px-6 lg:px-8 py-4 border-b bg-white">
-    <div class="flex items-center justify-between gap-3">
-      <h1 class="text-xl sm:text-2xl font-semibold">Rooms Kanban — Deliveries Control</h1>
+<header class="px-4 sm:px-6 lg:px-8 py-4 border-b bg-white">
+  <div class="flex items-center justify-between gap-3">
+    <h1 class="text-xl sm:text-2xl font-semibold">Rooms Kanban — Deliveries Control</h1>
+    <div class="flex items-center gap-2">
+      <button id="btnExport" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Export JSON</button>
+      <label class="px-3 py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm cursor-pointer">
+        <input id="fileExcel" type="file" accept=".xlsx,.xls,.csv" class="hidden"> Import Excel / CSV
+      </label>
+      <button id="btnReset" class="px-3 py-2 rounded-xl bg-red-50 text-red-700 hover:bg-red-100 text-sm">Reset (estados)</button>
+    </div>
+  </div>
+  <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    <div><label class="text-xs font-medium">Floor</label>
+      <select id="filterFloor" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"><option value="">All floors</option></select>
+    </div>
+    <div><label class="text-xs font-medium">Room</label>
+      <input id="filterRoom" placeholder="e.g., 202" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"/>
+    </div>
+    <div><label class="text-xs font-medium">Room Type</label>
+      <select id="filterType" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"><option value="">All types</option></select>
+    </div>
+    <div><label class="text-xs font-medium">Status</label>
+      <select id="filterStatus" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
+        <option value="">All</option><option value="complete">Complete</option><option value="partial">Partial</option><option value="none">No Delivered</option>
+      </select>
+    </div>
+  </div>
+</header>
+
+<main class="p-4 sm:p-6 lg:p-8">
+  <div id="kanban" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"></div>
+</main>
+
+<!-- Modal -->
+<div id="roomModal" class="fixed inset-0 hidden items-start justify-center p-4 modal-backdrop z-50">
+  <div class="w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-4 border-b">
+      <div><h2 id="mdTitle" class="text-lg font-semibold">Room</h2>
+        <p id="mdSubtitle" class="text-xs text-gray-500"></p></div>
+      <button id="mdClose" class="p-2 rounded-xl hover:bg-gray-100" aria-label="Close"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <div class="px-5 py-4 grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <section class="lg:col-span-2">
+        <div class="flex items-center justify-between mb-2"><h3 class="font-medium">Required items</h3><div id="mdProgress" class="text-sm text-gray-600"></div></div>
+        <div id="mdItems" class="space-y-2 max-h-[52vh] overflow-auto pr-1 scroll-shadow"></div>
+      </section>
+      <aside class="lg:col-span-1 space-y-4">
+        <div class="border rounded-xl p-3">
+          <label class="text-xs font-medium">Verification</label>
+          <select id="mdVerifier" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"></select>
+          <button id="mdAddVerification" class="mt-2 w-full py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm">Add verification entry</button>
+          <p class="mt-2 text-xs text-gray-500">Guarda nombre + fecha/hora.</p>
+        </div>
+        <div class="border rounded-xl p-3">
+          <label class="text-xs font-medium block">History</label>
+          <div id="mdHistory" class="mt-1 text-sm max-h-40 overflow-auto space-y-1"></div>
+        </div>
+        <div class="border rounded-xl p-3">
+          <label class="text-xs font-medium block">Notes</label>
+          <textarea id="mdNotes" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring" rows="4" placeholder="Add notes…"></textarea>
+          <button id="mdSaveNotes" class="mt-2 w-full py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Save notes</button>
+        </div>
+      </aside>
+    </div>
+    <div class="px-5 py-3 border-t flex items-center justify-between">
+      <div class="text-sm"><span class="font-medium">Room status:</span> <span id="mdStatus" class="ml-1"></span></div>
       <div class="flex items-center gap-2">
-        <button id="btnExport" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Export JSON</button>
-        <label class="px-3 py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm cursor-pointer">
-          <input id="fileExcel" type="file" accept=".xlsx,.xls,.csv" class="hidden">
-          Import Excel / CSV
-        </label>
-        <button id="btnReset" class="px-3 py-2 rounded-xl bg-red-50 text-red-700 hover:bg-red-100 text-sm">Reset (solo estados)</button>
-      </div>
-    </div>
-
-    <!-- Filtros -->
-    <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      <div>
-        <label class="text-xs font-medium">Floor</label>
-        <select id="filterFloor" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
-          <option value="">All floors</option>
-        </select>
-      </div>
-      <div>
-        <label class="text-xs font-medium">Room</label>
-        <input id="filterRoom" placeholder="e.g., 202" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"/>
-      </div>
-      <div>
-        <label class="text-xs font-medium">Room Type</label>
-        <select id="filterType" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
-          <option value="">All types</option>
-        </select>
-      </div>
-      <div>
-        <label class="text-xs font-medium">Status</label>
-        <select id="filterStatus" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
-          <option value="">All</option>
-          <option value="complete">Complete</option>
-          <option value="partial">Partial</option>
-          <option value="none">No Delivered</option>
-        </select>
-      </div>
-    </div>
-  </header>
-
-  <!-- Board -->
-  <main class="p-4 sm:p-6 lg:p-8">
-    <div id="kanban" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"></div>
-  </main>
-
-  <!-- Room Modal -->
-  <div id="roomModal" class="fixed inset-0 hidden items-start justify-center p-4 modal-backdrop z-50">
-    <div class="w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden">
-      <div class="flex items-center justify-between px-5 py-4 border-b">
-        <div>
-          <h2 id="mdTitle" class="text-lg font-semibold">Room</h2>
-          <p id="mdSubtitle" class="text-xs text-gray-500"></p>
-        </div>
-        <button id="mdClose" class="p-2 rounded-xl hover:bg-gray-100" aria-label="Close">
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
-      </div>
-
-      <div class="px-5 py-4 grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <!-- Items -->
-        <section class="lg:col-span-2">
-          <div class="flex items-center justify-between mb-2">
-            <h3 class="font-medium">Required items</h3>
-            <div id="mdProgress" class="text-sm text-gray-600"></div>
-          </div>
-          <div id="mdItems" class="space-y-2 max-h-[52vh] overflow-auto pr-1 scroll-shadow"></div>
-        </section>
-
-        <!-- Meta -->
-        <aside class="lg:col-span-1 space-y-4">
-          <div class="border rounded-xl p-3">
-            <label class="text-xs font-medium">Verification</label>
-            <select id="mdVerifier" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"></select>
-            <button id="mdAddVerification" class="mt-2 w-full py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm">Add verification entry</button>
-            <p class="mt-2 text-xs text-gray-500">Guarda nombre + fecha/hora. Cada vez que verifiques, se registra.</p>
-          </div>
-
-          <div class="border rounded-xl p-3">
-            <label class="text-xs font-medium block">History</label>
-            <div id="mdHistory" class="mt-1 text-sm max-h-40 overflow-auto space-y-1"></div>
-          </div>
-
-          <div class="border rounded-xl p-3">
-            <label class="text-xs font-medium block">Notes</label>
-            <textarea id="mdNotes" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring" rows="4" placeholder="Add notes…"></textarea>
-            <button id="mdSaveNotes" class="mt-2 w-full py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Save notes</button>
-          </div>
-        </aside>
-      </div>
-
-      <div class="px-5 py-3 border-t flex items-center justify-between">
-        <div class="text-sm"><span class="font-medium">Room status:</span> <span id="mdStatus" class="ml-1"></span></div>
-        <div class="flex items-center gap-2">
-          <button id="mdMarkAll" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-sm">Mark all delivered</button>
-          <button id="mdClearAll" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Clear all</button>
-        </div>
+        <button id="mdMarkAll" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-sm">Mark all delivered</button>
+        <button id="mdClearAll" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Clear all</button>
       </div>
     </div>
   </div>
+</div>
 
-  <script>
-    /***** QUICK HOW-TO ***************************************************
-     * 1) Click "Import Excel / CSV" y selecciona tu archivo.
-     *    Estructura esperada (puede estar en una sola hoja):
-     *      Floor | Room | RoomType | Item | Qty
-     *    También admite una hoja (opcional) llamada "Team" con:
-     *      Name
-     * 2) Los estados, historial y notas se guardan en localStorage.
-     * 3) Puedes exportar el estado con "Export JSON".
-     ********************************************************************/
+<script>
+const STORAGE_KEY='moorDeliveryV1';
+let DATA={rooms:[],team:[]};
+let STATE=loadState();
 
-    // ======= Data & Storage =======
-    const STORAGE_KEY = 'moorDeliveryV1';
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+const fmtDate=ts=>new Date(ts).toLocaleString();
 
-    // Internal state
-    let DATA = {
-      rooms: [],     // [{room:'202', floor:2, type:'A1', items:[{key:'G-113', name:'Queen Bed Base', qty:2}], }]
-      team: ['Amilcar Hernandez','Milka Hernandez','Paul Team','Warehouse Crew'],
-    };
-    let STATE = loadState(); // { delivery:{[room]: { items:{itemKey:true|false}, history:[{by,ts}], notes:'' }} }
+function loadState(){ try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||{delivery:{}}}catch(e){return{delivery:{}}} }
+function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); }
 
-    function loadState(){
-      try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { delivery:{} }; }
-      catch(e){ return { delivery:{} }; }
-    }
-    function saveState(){
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
-    }
+function statusForRoom(room){
+  const d = STATE.delivery[room.room]?.items || {};
+  const total = room.items.length;
+  const delivered = room.items.filter(it=>d[it.key]===true).length;
+  if(total===0 || delivered===0) return {code:'none',label:'No Delivered'};
+  if(delivered===total) return {code:'complete',label:'Complete'};
+  return {code:'partial',label:'Partial'};
+}
+function badge(st){const m={complete:'text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200',partial:'text-amber-700 bg-amber-50 ring-1 ring-amber-200',none:'text-gray-600 bg-gray-100 ring-1 ring-gray-200'};return `<span class="px-2 py-0.5 rounded-lg text-xs ${m[st.code]}">${st.label}</span>`;}
+function unique(a){return Array.from(new Set(a));}
 
-    // ======= Helpers =======
-    const $ = (sel, root=document) => root.querySelector(sel);
-    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
-    const fmtDate = ts => new Date(ts).toLocaleString();
-    function statusForRoom(roomObj){
-      const items = roomObj.items || [];
-      const d = STATE.delivery[roomObj.room]?.items || {};
-      const total = items.length;
-      const delivered = items.filter(it => d[it.key] === true).length;
-      if (total === 0) return {code:'none', label:'No Delivered'};
-      if (delivered === 0) return {code:'none', label:'No Delivered'};
-      if (delivered === total) return {code:'complete', label:'Complete'};
-      return {code:'partial', label:'Partial'};
-    }
-    function badge(status){
-      const map = {
-        complete: 'text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200',
-        partial:  'text-amber-700 bg-amber-50 ring-1 ring-amber-200',
-        none:     'text-gray-600 bg-gray-100 ring-1 ring-gray-200'
-      };
-      return `<span class="px-2 py-0.5 rounded-lg text-xs ${map[status.code]}">${status.label}</span>`;
-    }
-    function unique(arr){ return Array.from(new Set(arr)); }
+const kanbanEl=$('#kanban');
+const filterEls={floor:$('#filterFloor'),room:$('#filterRoom'),type:$('#filterType'),status:$('#filterStatus')};
 
-    // ======= Rendering Kanban =======
-    const kanbanEl = $('#kanban');
-    const filterEls = {
-      floor: $('#filterFloor'),
-      room: $('#filterRoom'),
-      type: $('#filterType'),
-      status: $('#filterStatus'),
-    };
+function buildFilters(){
+  const floors=unique(DATA.rooms.map(r=>r.floor)).sort((a,b)=>a-b);
+  filterEls.floor.innerHTML='<option value="">All floors</option>'+floors.map(f=>`<option value="${f}">${f}</option>`).join('');
+  const types=unique(DATA.rooms.map(r=>r.type)).sort();
+  filterEls.type.innerHTML='<option value="">All types</option>'+types.map(t=>`<option value="${t}">${t}</option>`).join('');
+}
 
-    function buildFilters(){
-      // Floors
-      const floors = unique(DATA.rooms.map(r => r.floor)).sort((a,b)=>a-b);
-      filterEls.floor.innerHTML = '<option value="">All floors</option>' + floors.map(f=>`<option value="${f}">${f}</option>`).join('');
-      // Room types
-      const types = unique(DATA.rooms.map(r => r.type)).sort();
-      filterEls.type.innerHTML = '<option value="">All types</option>' + types.map(t=>`<option value="${t}">${t}</option>`).join('');
-    }
+function applyFilters(room){
+  const fFloor=filterEls.floor.value, fRoom=filterEls.room.value.trim(), fType=filterEls.type.value, fStatus=filterEls.status.value;
+  if(fFloor && String(room.floor)!==String(fFloor)) return false;
+  if(fRoom && !String(room.room).includes(fRoom)) return false;
+  if(fType && room.type!==fType) return false;
+  if(fStatus){ const s=statusForRoom(room).code; if(s!==fStatus) return false; }
+  return true;
+}
 
-    function applyFilters(room){
-      const fFloor = filterEls.floor.value;
-      const fRoom = filterEls.room.value.trim();
-      const fType = filterEls.type.value;
-      const fStatus = filterEls.status.value;
+function renderKanban(){
+  const byFloor={}; DATA.rooms.forEach(r=>{ if(!applyFilters(r)) return; (byFloor[r.floor]=byFloor[r.floor]||[]).push(r); });
+  const floorsSorted=Object.keys(byFloor).sort((a,b)=>Number(a)-Number(b));
+  let html=''; floorsSorted.forEach(floor=>{
+    const rooms=byFloor[floor].sort((a,b)=>Number(a.room)-Number(b.room));
+    html+=`<section class="bg-white border rounded-2xl shadow-sm flex flex-col">
+      <div class="px-4 py-3 border-b flex items-center justify-between">
+        <div class="flex items-center gap-2"><span class="w-8 h-8 rounded-xl bg-gray-900 text-white grid place-items-center font-semibold">${floor}</span><h2 class="font-medium">Floor ${floor}</h2></div>
+        <span class="text-xs text-gray-500">${rooms.length} rooms</span>
+      </div>
+      <div class="p-3 space-y-3 max-h-[70vh] overflow-auto scroll-shadow">${rooms.map(roomCard).join('')}</div>
+    </section>`;
+  });
+  kanbanEl.innerHTML=html||`<div class="text-sm text-gray-600">No rooms match your filters.</div>`;
+  lucide.createIcons(); $$('.room-card').forEach(c=>c.addEventListener('click',()=>openRoomModal(c.dataset.room)));
+}
+function roomCard(room){ const st=statusForRoom(room);
+  return `<article class="room-card cursor-pointer border rounded-xl p-3 hover:shadow-md transition bg-white" data-room="${room.room}">
+    <div class="flex items-start justify-between"><div><div class="text-lg font-semibold leading-none">${room.room}</div>
+    <div class="mt-1 text-xs text-gray-500">Type <span class="font-medium">${room.type}</span></div></div>${badge(st)}</div></article>`}
 
-      if (fFloor && String(room.floor) !== String(fFloor)) return false;
-      if (fRoom && !String(room.room).includes(fRoom)) return false;
-      if (fType && room.type !== fType) return false;
-      if (fStatus){
-        const s = statusForRoom(room).code;
-        if (s !== fStatus) return false;
-      }
-      return true;
-    }
+const modal=$('#roomModal');
+const md={title:$('#mdTitle'),subtitle:$('#mdSubtitle'),items:$('#mdItems'),status:$('#mdStatus'),progress:$('#mdProgress'),verifier:$('#mdVerifier'),addVerification:$('#mdAddVerification'),history:$('#mdHistory'),notes:$('#mdNotes'),saveNotes:$('#mdSaveNotes'),markAll:$('#mdMarkAll'),clearAll:$('#mdClearAll'),close:$('#mdClose')};
+let currentRoom=null;
 
-    function renderKanban(){
-      // Agrupar por piso
-      const byFloor = {};
-      DATA.rooms.forEach(r => {
-        if (!applyFilters(r)) return;
-        byFloor[r.floor] = byFloor[r.floor] || [];
-        byFloor[r.floor].push(r);
-      });
+function openRoomModal(num){
+  currentRoom=DATA.rooms.find(r=>String(r.room)===String(num)); if(!currentRoom) return;
+  md.title.textContent=`Room ${currentRoom.room}`; md.subtitle.textContent=`Floor ${currentRoom.floor} • Type ${currentRoom.type}`;
+  const d=STATE.delivery[currentRoom.room]?.items||{};
+  md.items.innerHTML=currentRoom.items.map(it=>`<label class="flex items-center gap-3 border rounded-xl p-2.5">
+      <input type="checkbox" data-item="${it.key}" ${d[it.key]?'checked':''} class="h-4 w-4 rounded border-gray-300 text-gray-900 focus-ring">
+      <div class="flex-1"><div class="text-sm font-medium">${it.key} — ${it.name}</div>
+      <div class="text-xs text-gray-500">Qty: <span class="px-1.5 py-0.5 rounded bg-gray-100">${it.qty}</span></div></div></label>`).join('');
+  md.verifier.innerHTML=(DATA.team&&DATA.team.length?DATA.team:['Amilcar Hernandez','Milka Hernandez','Paul Team','Warehouse Crew']).map(n=>`<option>${n}</option>`).join('');
+  renderHistory(); md.notes.value=STATE.delivery[currentRoom.room]?.notes||''; updateModalStatus();
+  modal.classList.remove('hidden'); modal.classList.add('flex'); lucide.createIcons();
+  $$('#mdItems input[type="checkbox"]').forEach(cb=>cb.addEventListener('change',()=>{
+    const key=cb.dataset.item; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''};
+    STATE.delivery[currentRoom.room].items[key]=cb.checked; saveState(); updateModalStatus(); renderKanban();
+  }));
+}
+function closeRoomModal(){ modal.classList.add('hidden'); modal.classList.remove('flex'); currentRoom=null; }
+function updateModalStatus(){ if(!currentRoom) return; const st=statusForRoom(currentRoom); md.status.innerHTML=badge(st);
+  const d=STATE.delivery[currentRoom.room]?.items||{}; const delivered=currentRoom.items.filter(it=>d[it.key]).length;
+  md.progress.textContent=`${delivered}/${currentRoom.items.length} delivered`; }
+function renderHistory(){ const h=STATE.delivery[currentRoom.room]?.history||[]; md.history.innerHTML=h.length? h.slice().reverse().map(x=>`<div class="text-sm"><span class="font-medium">${x.by}</span> • <span class="text-gray-500">${fmtDate(x.ts)}</span></div>`).join('') : `<div class="text-gray-500 text-sm">No entries yet.</div>`; }
 
-      const floorsSorted = Object.keys(byFloor).sort((a,b)=>Number(a)-Number(b));
-      let html = '';
-      floorsSorted.forEach(floor => {
-        const rooms = byFloor[floor].sort((a,b)=>Number(a.room)-Number(b.room));
-        html += `
-          <section class="bg-white border rounded-2xl shadow-sm flex flex-col">
-            <div class="px-4 py-3 border-b flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="w-8 h-8 rounded-xl bg-gray-900 text-white grid place-items-center font-semibold">${floor}</span>
-                <h2 class="font-medium">Floor ${floor}</h2>
-              </div>
-              <span class="text-xs text-gray-500">${rooms.length} rooms</span>
-            </div>
-            <div class="p-3 space-y-3 max-h-[70vh] overflow-auto scroll-shadow">
-              ${rooms.map(roomCard).join('')}
-            </div>
-          </section>
-        `;
-      });
-
-      kanbanEl.innerHTML = html || `<div class="text-sm text-gray-600">No rooms match your filters.</div>`;
-      lucide.createIcons();
-      // Wire click handlers
-      $$('.room-card').forEach(card=>{
-        card.addEventListener('click', ()=> openRoomModal(card.dataset.room));
-      });
-    }
-
-    function roomCard(room){
-      const st = statusForRoom(room);
-      return `
-        <article class="room-card cursor-pointer border rounded-xl p-3 hover:shadow-md transition bg-white" data-room="${room.room}">
-          <div class="flex items-start justify-between">
-            <div>
-              <div class="text-lg font-semibold leading-none">${room.room}</div>
-              <div class="mt-1 text-xs text-gray-500">Type <span class="font-medium">${room.type}</span></div>
-            </div>
-            ${badge(st)}
-          </div>
-        </article>
-      `;
-    }
-
-    // ======= Modal (Room details) =======
-    const modal = $('#roomModal');
-    const md = {
-      title: $('#mdTitle'),
-      subtitle: $('#mdSubtitle'),
-      items: $('#mdItems'),
-      status: $('#mdStatus'),
-      progress: $('#mdProgress'),
-      verifier: $('#mdVerifier'),
-      addVerification: $('#mdAddVerification'),
-      history: $('#mdHistory'),
-      notes: $('#mdNotes'),
-      saveNotes: $('#mdSaveNotes'),
-      markAll: $('#mdMarkAll'),
-      clearAll: $('#mdClearAll'),
-      close: $('#mdClose'),
-    };
-    let currentRoom = null;
-
-    function openRoomModal(roomNumber){
-      currentRoom = DATA.rooms.find(r=> String(r.room) === String(roomNumber));
-      if (!currentRoom) return;
-
-      // Header
-      md.title.textContent = `Room ${currentRoom.room}`;
-      md.subtitle.textContent = `Floor ${currentRoom.floor} • Type ${currentRoom.type}`;
-
-      // Items list
-      const d = STATE.delivery[currentRoom.room]?.items || {};
-      md.items.innerHTML = currentRoom.items.map(it=>{
-        const checked = !!d[it.key];
-        return `
-          <label class="flex items-center gap-3 border rounded-xl p-2.5">
-            <input type="checkbox" data-item="${it.key}" ${checked?'checked':''}
-              class="h-4 w-4 rounded border-gray-300 text-gray-900 focus-ring">
-            <div class="flex-1">
-              <div class="text-sm font-medium">${it.key} — ${it.name}</div>
-              <div class="text-xs text-gray-500">Qty: <span class="px-1.5 py-0.5 rounded bg-gray-100">${it.qty}</span></div>
-            </div>
-          </label>
-        `;
-      }).join('');
-
-      // Team dropdown
-      md.verifier.innerHTML = DATA.team.map(n=>`<option value="${n}">${n}</option>`).join('');
-
-      // History
-      renderHistory();
-
-      // Notes
-      md.notes.value = STATE.delivery[currentRoom.room]?.notes || '';
-
-      // Status/progress
-      updateModalStatus();
-
-      modal.classList.remove('hidden');
-      modal.classList.add('flex');
-      lucide.createIcons();
-
-      // Events
-      $$('#mdItems input[type="checkbox"]', document).forEach(cb=>{
-        cb.addEventListener('change', ()=>{
-          const key = cb.dataset.item;
-          STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
-          STATE.delivery[currentRoom.room].items[key] = cb.checked;
-          saveState();
-          updateModalStatus();
-          renderKanban();
-        });
-      });
-    }
-
-    function closeRoomModal(){
-      modal.classList.add('hidden');
-      modal.classList.remove('flex');
-      currentRoom = null;
-    }
-
-    function updateModalStatus(){
-      if (!currentRoom) return;
-      const st = statusForRoom(currentRoom);
-      md.status.innerHTML = badge(st);
-      // Progress
-      const total = currentRoom.items.length;
-      const d = STATE.delivery[currentRoom.room]?.items || {};
-      const delivered = currentRoom.items.filter(it => d[it.key]).length;
-      md.progress.textContent = `${delivered}/${total} delivered`;
-    }
-
-    function renderHistory(){
-      const history = STATE.delivery[currentRoom.room]?.history || [];
-      if (history.length === 0){
-        md.history.innerHTML = `<div class="text-gray-500 text-sm">No entries yet.</div>`;
-        return;
-      }
-      md.history.innerHTML = history.slice().reverse().map(h=>`
-        <div class="text-sm"><span class="font-medium">${h.by}</span> • <span class="text-gray-500">${fmtDate(h.ts)}</span></div>
-      `).join('');
-    }
-
-    // ======= Import / Export =======
-    async function parseWorkbook(wb){
-      // Try to find headers in any sheet
-      let rows = [];
-      wb.SheetNames.forEach(name=>{
-        const ws = wb.Sheets[name];
-        const arr = XLSX.utils.sheet_to_json(ws, {defval:''});
-        rows = rows.concat(arr);
-      });
-
-      // If there is a sheet "Team"
-      let team = [];
-      if (wb.SheetNames.includes('Team')){
-        const wsT = wb.Sheets['Team'];
-        const arrT = XLSX.utils.sheet_to_json(wsT, {defval:''});
-        team = unique(arrT.map(r => (r.Name || r.NAME || r.name || '').toString().trim()).filter(Boolean));
-      }
-
-      // Expect at least columns: Floor | Room | RoomType | Item | Qty
-      const norm = rows
-        .map(r => ({
-          floor: Number(r.Floor ?? r.floor ?? r.Piso ?? r.piso ?? r.Level ?? r.level ?? ''),
-          room:  String(r.Room ?? r.room ?? r.Habitacion ?? r.habitacion ?? '').trim(),
-          type:  String(r.RoomType ?? r.Type ?? r.Room_Type ?? r.type ?? '').trim(),
-          item:  String(r.Item ?? r.ItemName ?? r['Item Name'] ?? r.item ?? '').trim(),
-          qty:   Number(r.Qty ?? r.Quantity ?? r.qty ?? r.quantity ?? 1),
-        }))
-        .filter(r => !!r.floor && !!r.room && !!r.item);
-
-      // Group into rooms
-      const map = new Map();
-      norm.forEach(r=>{
-        const key = r.room;
-        if (!map.has(key)){
-          map.set(key, { room: r.room, floor: r.floor, type: r.type || '', items: [] });
-        }
-        const room = map.get(key);
-        room.floor = room.floor || r.floor;
-        room.type = room.type || r.type || '';
-        room.items.push({ key: r.item, name: r.item, qty: r.qty || 1 });
-      });
-
-      DATA.rooms = Array.from(map.values());
-      if (team.length) DATA.team = team;
-
-      // Rebuild UI
-      buildFilters();
-      renderKanban();
-    }
-
-    // ======= Seed (example) if no Excel loaded yet =======
-    function seedExample(){
-      DATA.rooms = [
-        {room:'202', floor:2, type:'A1', items:[
-          {key:'G-113A', name:'Queen Bed Base ADA', qty:1},
-          {key:'G-113', name:'Queen Bed Base', qty:2},
-          {key:'G-105B', name:'Queen Headboard', qty:1},
-          {key:'G-102', name:'Desk Chair', qty:1},
-          {key:'G-104', name:'Nightstand', qty:1},
-          {key:'MB-180', name:'Reading Light', qty:4},
-        ]},
-        {room:'203', floor:2, type:'F', items:[
-          {key:'G-114', name:'King Bed Base', qty:1},
-          {key:'G-105A', name:'King Headboard', qty:1},
-          {key:'G-111', name:'Side Chair', qty:1},
-        ]},
-        {room:'301', floor:3, type:'I', items:[
-          {key:'G-103', name:'Desk Chair', qty:1},
-          {key:'G-112', name:'Luggage Rack', qty:1},
-        ]},
-        {room:'302', floor:3, type:'A1', items:[
-          {key:'G-113', name:'Queen Bed Base', qty:2},
-          {key:'G-104', name:'Nightstand', qty:1},
-        ]},
-      ];
-      buildFilters();
-      renderKanban();
-    }
-
-    // ======= Events =======
-    // Filters
-    Object.values(filterEls).forEach(el => el.addEventListener('input', renderKanban));
-
-    // File input
-    $('#fileExcel').addEventListener('change', async (e)=>{
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const data = await file.arrayBuffer();
-      const wb = XLSX.read(data, {type:'array'});
-      await parseWorkbook(wb);
+async function parseWorkbook(wb){
+  // Lee todas las hojas y normaliza posibles encabezados
+  let rows=[]; wb.SheetNames.forEach(n=>{ rows=rows.concat(XLSX.utils.sheet_to_json(wb.Sheets[n],{defval:''})); });
+  // Detecta formato ancho (cada ítem en columna) => el de tu Excel
+  const baseA=['Floor','Room Number','Room Type']; const hasWide=baseA.every(c=>rows[0]&&rows[0][c]!==undefined);
+  if(hasWide){
+    const itemCols=Object.keys(rows[0]).filter(c=>!baseA.includes(c));
+    const map=new Map();
+    rows.forEach(r=>{
+      const room=String(r['Room Number']||'').trim(); const floor=Number(r['Floor']||''); const type=String(r['Room Type']||'').trim();
+      if(!room||!floor) return;
+      const items=[]; itemCols.forEach(c=>{ const q=Number(r[c]||0); if(q>0){ const key=String(c).split(' ')[0]; items.push({key,name:c,qty:q}); }});
+      map.set(room,{room,floor,type,items});
     });
-
-    // Export
-    $('#btnExport').addEventListener('click', ()=>{
-      const payload = {
-        DATA, STATE
-      };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'rooms-deliveries.json';
-      a.click();
-      URL.revokeObjectURL(a.href);
+    DATA.rooms=Array.from(map.values());
+  }else{
+    // Formato largo: Floor | Room | RoomType | Item | Qty
+    const map=new Map();
+    rows.forEach(r=>{
+      const floor=Number(r.Floor||r.floor||''); const room=String(r.Room||r['Room Number']||'').trim(); const type=String(r.RoomType||r['Room Type']||'').trim();
+      const item=String(r.Item||'').trim(); const qty=Number(r.Qty||r.Quantity||0);
+      if(!floor||!room||!item||qty<=0) return;
+      if(!map.has(room)) map.set(room,{room,floor,type,items:[]});
+      map.get(room).items.push({key:item.split(' ')[0],name:item,qty});
     });
+    DATA.rooms=Array.from(map.values());
+  }
+  buildFilters(); renderKanban();
+}
 
-    // Reset (solo estados)
-    $('#btnReset').addEventListener('click', ()=>{
-      if (!confirm('Clear all delivery states, history and notes?')) return;
-      STATE = { delivery:{} };
-      saveState();
-      renderKanban();
-      if (currentRoom) openRoomModal(currentRoom.room);
-    });
+Object.values(filterEls).forEach(el=>el.addEventListener('input',renderKanban));
+$('#fileExcel').addEventListener('change', async e=>{
+  const f=e.target.files?.[0]; if(!f) return; const ab=await f.arrayBuffer(); const wb=XLSX.read(ab,{type:'array'}); await parseWorkbook(wb);
+});
+$('#btnExport').addEventListener('click', ()=>{
+  const payload={DATA,STATE}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms-deliveries.json'; a.click(); URL.revokeObjectURL(a.href);
+});
+$('#btnReset').addEventListener('click', ()=>{ if(!confirm('Clear all delivery states, history and notes?')) return; STATE={delivery:{}}; saveState(); renderKanban(); if(currentRoom) openRoomModal(currentRoom.room); });
+md.close.addEventListener('click', closeRoomModal); $('#roomModal').addEventListener('click', e=>{ if(e.target===$('#roomModal')) closeRoomModal(); });
+md.addVerification.addEventListener('click', ()=>{ if(!currentRoom) return; const by=$('#mdVerifier').value||'—'; const ts=Date.now();
+  STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; STATE.delivery[currentRoom.room].history.push({by,ts}); saveState(); renderHistory(); });
+md.saveNotes.addEventListener('click', ()=>{ if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; STATE.delivery[currentRoom.room].notes=$('#mdNotes').value||''; saveState(); alert('Notes saved'); });
+md.markAll.addEventListener('click', ()=>{ if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; currentRoom.items.forEach(it=>STATE.delivery[currentRoom.room].items[it.key]=true); saveState(); updateModalStatus(); renderKanban(); openRoomModal(currentRoom.room); });
+md.clearAll.addEventListener('click', ()=>{ if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; currentRoom.items.forEach(it=>STATE.delivery[currentRoom.room].items[it.key]=false); saveState(); updateModalStatus(); renderKanban(); openRoomModal(currentRoom.room); });
 
-    // Modal actions
-    md.close.addEventListener('click', closeRoomModal);
-    modal.addEventListener('click', (e)=>{ if (e.target === modal) closeRoomModal(); });
-
-    md.addVerification.addEventListener('click', ()=>{
-      if (!currentRoom) return;
-      const by = md.verifier.value || '—';
-      const ts = Date.now();
-      STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
-      STATE.delivery[currentRoom.room].history.push({by, ts});
-      saveState();
-      renderHistory();
-    });
-
-    md.saveNotes.addEventListener('click', ()=>{
-      if (!currentRoom) return;
-      STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
-      STATE.delivery[currentRoom.room].notes = md.notes.value || '';
-      saveState();
-      alert('Notes saved');
-    });
-
-    md.markAll.addEventListener('click', ()=>{
-      if (!currentRoom) return;
-      STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
-      currentRoom.items.forEach(it => { STATE.delivery[currentRoom.room].items[it.key] = true; });
-      saveState();
-      updateModalStatus();
-      renderKanban();
-      openRoomModal(currentRoom.room); // refresh checkboxes
-    });
-
-    md.clearAll.addEventListener('click', ()=>{
-      if (!currentRoom) return;
-      STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
-      currentRoom.items.forEach(it => { STATE.delivery[currentRoom.room].items[it.key] = false; });
-      saveState();
-      updateModalStatus();
-      renderKanban();
-      openRoomModal(currentRoom.room);
-    });
-
-    // Initial
-    seedExample(); // Muestra demo hasta que importes tu Excel
-    buildFilters();
-    renderKanban();
-    lucide.createIcons();
-  </script>
+// === Carga inicial desde rooms_data.json (tu Excel convertido) ===
+async function boot(){
+  try{
+    const res=await fetch('rooms_data.json',{cache:'no-store'}); 
+    if(res.ok){ const raw=await res.json(); DATA.rooms=raw.rooms||[]; DATA.team=raw.team||[]; }
+    else { console.warn('rooms_data.json no encontrado. Puedes importar Excel con el botón.'); }
+  }catch(e){ console.warn('No se pudo cargar rooms_data.json', e); }
+  buildFilters(); renderKanban(); lucide.createIcons();
+}
+boot();
+</script>
 </body>
 </html>
