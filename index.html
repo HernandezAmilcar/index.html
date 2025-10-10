@@ -1,21 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Rooms Kanban — Deliveries Control</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <style>
-    .scroll-shadow{-webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,1),rgba(0,0,0,1) 90%,rgba(0,0,0,0));mask-image:linear-gradient(to bottom,rgba(0,0,0,1),rgba(0,0,0,1) 90%,rgba(0,0,0,0))}
-    .modal-backdrop{background:rgba(0,0,0,.45)} .focus-ring:focus{outline:2px solid #2563eb;outline-offset:2px}
-  </style>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Rooms Kanban — Deliveries Control</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+.scroll-shadow{-webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,1),rgba(0,0,0,1) 90%,rgba(0,0,0,0));mask-image:linear-gradient(to bottom,rgba(0,0,0,1),rgba(0,0,0,1) 90%,rgba(0,0,0,0))}
+.modal-backdrop{background:rgba(0,0,0,.45)} .focus-ring:focus{outline:2px solid #2563eb;outline-offset:2px}
+</style>
 </head>
 <body class="bg-gray-50 text-gray-900">
 <header class="px-4 sm:px-6 lg:px-8 py-4 border-b bg-white">
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl sm:text-2xl font-semibold">Rooms Kanban — Deliveries Control</h1>
+    <div>
+      <h1 class="text-xl sm:text-2xl font-semibold">Rooms Kanban — Deliveries Control</h1>
+      <p id="dataBadge" class="text-xs text-gray-500 mt-1"></p>
+    </div>
     <div class="flex items-center gap-2">
       <button id="btnExport" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Export JSON</button>
       <label class="px-3 py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm cursor-pointer">
@@ -50,8 +52,7 @@
 <div id="roomModal" class="fixed inset-0 hidden items-start justify-center p-4 modal-backdrop z-50">
   <div class="w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden">
     <div class="flex items-center justify-between px-5 py-4 border-b">
-      <div><h2 id="mdTitle" class="text-lg font-semibold">Room</h2>
-        <p id="mdSubtitle" class="text-xs text-gray-500"></p></div>
+      <div><h2 id="mdTitle" class="text-lg font-semibold">Room</h2><p id="mdSubtitle" class="text-xs text-gray-500"></p></div>
       <button id="mdClose" class="p-2 rounded-xl hover:bg-gray-100" aria-label="Close"><i data-lucide="x" class="w-5 h-5"></i></button>
     </div>
     <div class="px-5 py-4 grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -66,10 +67,7 @@
           <button id="mdAddVerification" class="mt-2 w-full py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm">Add verification entry</button>
           <p class="mt-2 text-xs text-gray-500">Guarda nombre + fecha/hora.</p>
         </div>
-        <div class="border rounded-xl p-3">
-          <label class="text-xs font-medium block">History</label>
-          <div id="mdHistory" class="mt-1 text-sm max-h-40 overflow-auto space-y-1"></div>
-        </div>
+        <div class="border rounded-xl p-3"><label class="text-xs font-medium block">History</label><div id="mdHistory" class="mt-1 text-sm max-h-40 overflow-auto space-y-1"></div></div>
         <div class="border rounded-xl p-3">
           <label class="text-xs font-medium block">Notes</label>
           <textarea id="mdNotes" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring" rows="4" placeholder="Add notes…"></textarea>
@@ -91,18 +89,17 @@
 const STORAGE_KEY='moorDeliveryV1';
 let DATA={rooms:[],team:[]};
 let STATE=loadState();
-
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
 const fmtDate=ts=>new Date(ts).toLocaleString();
 
-function loadState(){ try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||{delivery:{}}}catch(e){return{delivery:{}}} }
-function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); }
+function loadState(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||{delivery:{}}}catch(e){return{delivery:{}}}}
+function saveState(){localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));}
 
 function statusForRoom(room){
-  const d = STATE.delivery[room.room]?.items || {};
-  const total = room.items.length;
-  const delivered = room.items.filter(it=>d[it.key]===true).length;
-  if(total===0 || delivered===0) return {code:'none',label:'No Delivered'};
+  const d=STATE.delivery[room.room]?.items||{};
+  const total=room.items.length;
+  const delivered=room.items.filter(it=>d[it.key]===true).length;
+  if(total===0||delivered===0) return {code:'none',label:'No Delivered'};
   if(delivered===total) return {code:'complete',label:'Complete'};
   return {code:'partial',label:'Partial'};
 }
@@ -111,31 +108,32 @@ function unique(a){return Array.from(new Set(a));}
 
 const kanbanEl=$('#kanban');
 const filterEls={floor:$('#filterFloor'),room:$('#filterRoom'),type:$('#filterType'),status:$('#filterStatus')};
-
 function buildFilters(){
   const floors=unique(DATA.rooms.map(r=>r.floor)).sort((a,b)=>a-b);
   filterEls.floor.innerHTML='<option value="">All floors</option>'+floors.map(f=>`<option value="${f}">${f}</option>`).join('');
   const types=unique(DATA.rooms.map(r=>r.type)).sort();
   filterEls.type.innerHTML='<option value="">All types</option>'+types.map(t=>`<option value="${t}">${t}</option>`).join('');
+  // Badge resumen
+  const rooms=DATA.rooms.length, items=DATA.rooms.reduce((s,r)=>s+r.items.length,0);
+  const fltxt=floors.join(', ');
+  $('#dataBadge').textContent = rooms? `${rooms} rooms • Floors: ${fltxt} • Items rows: ${items}` : 'Load rooms_data.json or use Import Excel';
 }
-
-function applyFilters(room){
-  const fFloor=filterEls.floor.value, fRoom=filterEls.room.value.trim(), fType=filterEls.type.value, fStatus=filterEls.status.value;
-  if(fFloor && String(room.floor)!==String(fFloor)) return false;
-  if(fRoom && !String(room.room).includes(fRoom)) return false;
-  if(fType && room.type!==fType) return false;
-  if(fStatus){ const s=statusForRoom(room).code; if(s!==fStatus) return false; }
+function applyFilters(r){
+  const fF=filterEls.floor.value, fR=filterEls.room.value.trim(), fT=filterEls.type.value, fS=filterEls.status.value;
+  if(fF && String(r.floor)!==String(fF)) return false;
+  if(fR && !String(r.room).includes(fR)) return false;
+  if(fT && r.type!==fT) return false;
+  if(fS){const s=statusForRoom(r).code; if(s!==fS) return false;}
   return true;
 }
-
 function renderKanban(){
-  const byFloor={}; DATA.rooms.forEach(r=>{ if(!applyFilters(r)) return; (byFloor[r.floor]=byFloor[r.floor]||[]).push(r); });
+  const byFloor={}; DATA.rooms.forEach(r=>{if(!applyFilters(r)) return;(byFloor[r.floor]=byFloor[r.floor]||[]).push(r);});
   const floorsSorted=Object.keys(byFloor).sort((a,b)=>Number(a)-Number(b));
-  let html=''; floorsSorted.forEach(floor=>{
-    const rooms=byFloor[floor].sort((a,b)=>Number(a.room)-Number(b.room));
+  let html=''; floorsSorted.forEach(f=>{
+    const rooms=byFloor[f].sort((a,b)=>Number(a.room)-Number(b.room));
     html+=`<section class="bg-white border rounded-2xl shadow-sm flex flex-col">
       <div class="px-4 py-3 border-b flex items-center justify-between">
-        <div class="flex items-center gap-2"><span class="w-8 h-8 rounded-xl bg-gray-900 text-white grid place-items-center font-semibold">${floor}</span><h2 class="font-medium">Floor ${floor}</h2></div>
+        <div class="flex items-center gap-2"><span class="w-8 h-8 rounded-xl bg-gray-900 text-white grid place-items-center font-semibold">${f}</span><h2 class="font-medium">Floor ${f}</h2></div>
         <span class="text-xs text-gray-500">${rooms.length} rooms</span>
       </div>
       <div class="p-3 space-y-3 max-h-[70vh] overflow-auto scroll-shadow">${rooms.map(roomCard).join('')}</div>
@@ -144,24 +142,22 @@ function renderKanban(){
   kanbanEl.innerHTML=html||`<div class="text-sm text-gray-600">No rooms match your filters.</div>`;
   lucide.createIcons(); $$('.room-card').forEach(c=>c.addEventListener('click',()=>openRoomModal(c.dataset.room)));
 }
-function roomCard(room){ const st=statusForRoom(room);
-  return `<article class="room-card cursor-pointer border rounded-xl p-3 hover:shadow-md transition bg-white" data-room="${room.room}">
-    <div class="flex items-start justify-between"><div><div class="text-lg font-semibold leading-none">${room.room}</div>
-    <div class="mt-1 text-xs text-gray-500">Type <span class="font-medium">${room.type}</span></div></div>${badge(st)}</div></article>`}
+function roomCard(r){const st=statusForRoom(r);return `<article class="room-card cursor-pointer border rounded-xl p-3 hover:shadow-md transition bg-white" data-room="${r.room}">
+  <div class="flex items-start justify-between"><div><div class="text-lg font-semibold leading-none">${r.room}</div>
+  <div class="mt-1 text-xs text-gray-500">Type <span class="font-medium">${r.type}</span></div></div>${badge(st)}</div></article>`}
 
 const modal=$('#roomModal');
 const md={title:$('#mdTitle'),subtitle:$('#mdSubtitle'),items:$('#mdItems'),status:$('#mdStatus'),progress:$('#mdProgress'),verifier:$('#mdVerifier'),addVerification:$('#mdAddVerification'),history:$('#mdHistory'),notes:$('#mdNotes'),saveNotes:$('#mdSaveNotes'),markAll:$('#mdMarkAll'),clearAll:$('#mdClearAll'),close:$('#mdClose')};
 let currentRoom=null;
-
-function openRoomModal(num){
-  currentRoom=DATA.rooms.find(r=>String(r.room)===String(num)); if(!currentRoom) return;
+function openRoomModal(n){
+  currentRoom=DATA.rooms.find(r=>String(r.room)===String(n)); if(!currentRoom) return;
   md.title.textContent=`Room ${currentRoom.room}`; md.subtitle.textContent=`Floor ${currentRoom.floor} • Type ${currentRoom.type}`;
   const d=STATE.delivery[currentRoom.room]?.items||{};
   md.items.innerHTML=currentRoom.items.map(it=>`<label class="flex items-center gap-3 border rounded-xl p-2.5">
-      <input type="checkbox" data-item="${it.key}" ${d[it.key]?'checked':''} class="h-4 w-4 rounded border-gray-300 text-gray-900 focus-ring">
-      <div class="flex-1"><div class="text-sm font-medium">${it.key} — ${it.name}</div>
-      <div class="text-xs text-gray-500">Qty: <span class="px-1.5 py-0.5 rounded bg-gray-100">${it.qty}</span></div></div></label>`).join('');
-  md.verifier.innerHTML=(DATA.team&&DATA.team.length?DATA.team:['Amilcar Hernandez','Milka Hernandez','Paul Team','Warehouse Crew']).map(n=>`<option>${n}</option>`).join('');
+    <input type="checkbox" data-item="${it.key}" ${d[it.key]?'checked':''} class="h-4 w-4 rounded border-gray-300 text-gray-900 focus-ring">
+    <div class="flex-1"><div class="text-sm font-medium">${it.key} — ${it.name}</div>
+    <div class="text-xs text-gray-500">Qty: <span class="px-1.5 py-0.5 rounded bg-gray-100">${it.qty}</span></div></div></label>`).join('');
+  md.verifier.innerHTML=(DATA.team.length?DATA.team:['Amilcar Hernandez','Milka Hernandez','Paul Team','Warehouse Crew']).map(n=>`<option>${n}</option>`).join('');
   renderHistory(); md.notes.value=STATE.delivery[currentRoom.room]?.notes||''; updateModalStatus();
   modal.classList.remove('hidden'); modal.classList.add('flex'); lucide.createIcons();
   $$('#mdItems input[type="checkbox"]').forEach(cb=>cb.addEventListener('change',()=>{
@@ -169,29 +165,22 @@ function openRoomModal(num){
     STATE.delivery[currentRoom.room].items[key]=cb.checked; saveState(); updateModalStatus(); renderKanban();
   }));
 }
-function closeRoomModal(){ modal.classList.add('hidden'); modal.classList.remove('flex'); currentRoom=null; }
-function updateModalStatus(){ if(!currentRoom) return; const st=statusForRoom(currentRoom); md.status.innerHTML=badge(st);
-  const d=STATE.delivery[currentRoom.room]?.items||{}; const delivered=currentRoom.items.filter(it=>d[it.key]).length;
-  md.progress.textContent=`${delivered}/${currentRoom.items.length} delivered`; }
-function renderHistory(){ const h=STATE.delivery[currentRoom.room]?.history||[]; md.history.innerHTML=h.length? h.slice().reverse().map(x=>`<div class="text-sm"><span class="font-medium">${x.by}</span> • <span class="text-gray-500">${fmtDate(x.ts)}</span></div>`).join('') : `<div class="text-gray-500 text-sm">No entries yet.</div>`; }
+function closeRoomModal(){modal.classList.add('hidden'); modal.classList.remove('flex'); currentRoom=null;}
+function updateModalStatus(){if(!currentRoom) return;const st=statusForRoom(currentRoom); md.status.innerHTML=badge(st);
+  const d=STATE.delivery[currentRoom.room]?.items||{}; const del=currentRoom.items.filter(it=>d[it.key]).length; md.progress.textContent=`${del}/${currentRoom.items.length} delivered`;}
+function renderHistory(){const h=STATE.delivery[currentRoom.room]?.history||[]; md.history.innerHTML=h.length?h.slice().reverse().map(x=>`<div class="text-sm"><span class="font-medium">${x.by}</span> • <span class="text-gray-500">${new Date(x.ts).toLocaleString()}</span></div>`).join(''):`<div class="text-gray-500 text-sm">No entries yet.</div>`;}
 
 async function parseWorkbook(wb){
-  // Lee todas las hojas y normaliza posibles encabezados
   let rows=[]; wb.SheetNames.forEach(n=>{ rows=rows.concat(XLSX.utils.sheet_to_json(wb.Sheets[n],{defval:''})); });
-  // Detecta formato ancho (cada ítem en columna) => el de tu Excel
-  const baseA=['Floor','Room Number','Room Type']; const hasWide=baseA.every(c=>rows[0]&&rows[0][c]!==undefined);
-  if(hasWide){
-    const itemCols=Object.keys(rows[0]).filter(c=>!baseA.includes(c));
-    const map=new Map();
+  const base=['Floor','Room Number','Room Type']; const wide=base.every(c=>rows[0]&&rows[0][c]!==undefined);
+  if(wide){
+    const itemCols=Object.keys(rows[0]).filter(c=>!base.includes(c)); const map=new Map();
     rows.forEach(r=>{
       const room=String(r['Room Number']||'').trim(); const floor=Number(r['Floor']||''); const type=String(r['Room Type']||'').trim();
-      if(!room||!floor) return;
-      const items=[]; itemCols.forEach(c=>{ const q=Number(r[c]||0); if(q>0){ const key=String(c).split(' ')[0]; items.push({key,name:c,qty:q}); }});
+      if(!room||!floor) return; const items=[]; itemCols.forEach(c=>{const q=Number(r[c]||0); if(q>0){const key=String(c).split(' ')[0]; items.push({key,name:c,qty:q});}});
       map.set(room,{room,floor,type,items});
-    });
-    DATA.rooms=Array.from(map.values());
+    }); DATA.rooms=Array.from(map.values());
   }else{
-    // Formato largo: Floor | Room | RoomType | Item | Qty
     const map=new Map();
     rows.forEach(r=>{
       const floor=Number(r.Floor||r.floor||''); const room=String(r.Room||r['Room Number']||'').trim(); const type=String(r.RoomType||r['Room Type']||'').trim();
@@ -199,35 +188,39 @@ async function parseWorkbook(wb){
       if(!floor||!room||!item||qty<=0) return;
       if(!map.has(room)) map.set(room,{room,floor,type,items:[]});
       map.get(room).items.push({key:item.split(' ')[0],name:item,qty});
-    });
-    DATA.rooms=Array.from(map.values());
+    }); DATA.rooms=Array.from(map.values());
   }
   buildFilters(); renderKanban();
 }
 
+// Filtros
 Object.values(filterEls).forEach(el=>el.addEventListener('input',renderKanban));
-$('#fileExcel').addEventListener('change', async e=>{
+// Import Excel
+document.getElementById('fileExcel').addEventListener('change', async e=>{
   const f=e.target.files?.[0]; if(!f) return; const ab=await f.arrayBuffer(); const wb=XLSX.read(ab,{type:'array'}); await parseWorkbook(wb);
+  DATA.team = DATA.team.length? DATA.team : ['Amilcar Hernandez','Milka Hernandez','Paul Team','Warehouse Crew'];
+  buildFilters(); renderKanban();
 });
-$('#btnExport').addEventListener('click', ()=>{
-  const payload={DATA,STATE}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms-deliveries.json'; a.click(); URL.revokeObjectURL(a.href);
-});
-$('#btnReset').addEventListener('click', ()=>{ if(!confirm('Clear all delivery states, history and notes?')) return; STATE={delivery:{}}; saveState(); renderKanban(); if(currentRoom) openRoomModal(currentRoom.room); });
-md.close.addEventListener('click', closeRoomModal); $('#roomModal').addEventListener('click', e=>{ if(e.target===$('#roomModal')) closeRoomModal(); });
-md.addVerification.addEventListener('click', ()=>{ if(!currentRoom) return; const by=$('#mdVerifier').value||'—'; const ts=Date.now();
-  STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; STATE.delivery[currentRoom.room].history.push({by,ts}); saveState(); renderHistory(); });
-md.saveNotes.addEventListener('click', ()=>{ if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; STATE.delivery[currentRoom.room].notes=$('#mdNotes').value||''; saveState(); alert('Notes saved'); });
-md.markAll.addEventListener('click', ()=>{ if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; currentRoom.items.forEach(it=>STATE.delivery[currentRoom.room].items[it.key]=true); saveState(); updateModalStatus(); renderKanban(); openRoomModal(currentRoom.room); });
-md.clearAll.addEventListener('click', ()=>{ if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; currentRoom.items.forEach(it=>STATE.delivery[currentRoom.room].items[it.key]=false); saveState(); updateModalStatus(); renderKanban(); openRoomModal(currentRoom.room); });
+// Export/Reset
+document.getElementById('btnExport').addEventListener('click',()=>{const payload={DATA,STATE}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms-deliveries.json'; a.click(); URL.revokeObjectURL(a.href);});
+document.getElementById('btnReset').addEventListener('click',()=>{if(!confirm('Clear all delivery states, history and notes?'))return; STATE={delivery:{}}; saveState(); renderKanban(); if(currentRoom) openRoomModal(currentRoom.room);});
+// Modal acciones
+document.getElementById('mdClose').addEventListener('click',()=>{closeRoomModal()});
+document.getElementById('roomModal').addEventListener('click',e=>{if(e.target===document.getElementById('roomModal')) closeRoomModal();});
+document.getElementById('mdAddVerification').addEventListener('click',()=>{if(!currentRoom) return; const by=document.getElementById('mdVerifier').value||'—'; const ts=Date.now(); STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; STATE.delivery[currentRoom.room].history.push({by,ts}); saveState(); renderHistory();});
+document.getElementById('mdSaveNotes').addEventListener('click',()=>{if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; STATE.delivery[currentRoom.room].notes=document.getElementById('mdNotes').value||''; saveState(); alert('Notes saved');});
+document.getElementById('mdMarkAll').addEventListener('click',()=>{if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; currentRoom.items.forEach(it=>STATE.delivery[currentRoom.room].items[it.key]=true); saveState(); updateModalStatus(); renderKanban(); openRoomModal(currentRoom.room);});
+document.getElementById('mdClearAll').addEventListener('click',()=>{if(!currentRoom) return; STATE.delivery[currentRoom.room]=STATE.delivery[currentRoom.room]||{items:{},history:[],notes:''}; currentRoom.items.forEach(it=>STATE.delivery[currentRoom.room].items[it.key]=false); saveState(); updateModalStatus(); renderKanban(); openRoomModal(currentRoom.room);});
 
-// === Carga inicial desde rooms_data.json (tu Excel convertido) ===
+// Boot: carga rooms_data.json (tu Excel ya convertido con TODOS los pisos/cuartos/ítems)
 async function boot(){
   try{
-    const res=await fetch('rooms_data.json',{cache:'no-store'}); 
-    if(res.ok){ const raw=await res.json(); DATA.rooms=raw.rooms||[]; DATA.team=raw.team||[]; }
-    else { console.warn('rooms_data.json no encontrado. Puedes importar Excel con el botón.'); }
-  }catch(e){ console.warn('No se pudo cargar rooms_data.json', e); }
+    const res=await fetch('rooms_data.json',{cache:'no-store'});
+    if(res.ok){
+      const raw=await res.json();
+      DATA.rooms=raw.rooms||[]; DATA.team=raw.team||[];
+    }
+  }catch(e){console.warn('rooms_data.json no encontrado. Usa Import Excel.');}
   buildFilters(); renderKanban(); lucide.createIcons();
 }
 boot();
