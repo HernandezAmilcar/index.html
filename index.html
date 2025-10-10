@@ -1,388 +1,537 @@
-<!doctype html>
-<html lang="es">
+<!DOCTYPE html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Simulador X→Y (pares · movimiento mínimo)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rooms Kanban – Deliveries Control</title>
+
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- XLSX parser (SheetJS) to read your Excel in-browser -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <style>
-    :root {
-      --bg:#f6f7fb; --fg:#0f172a; --muted:#64748b; --card:#ffffff; --line:#e2e8f0;
-      --blue:#2563eb;
+    /* Scroll shadows para columnas del kanban */
+    .scroll-shadow {
+      --mask: linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,1) 90%, rgba(0,0,0,0));
+      -webkit-mask-image: var(--mask);
+      mask-image: var(--mask);
     }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:var(--bg); color:var(--fg); }
-    .wrap { max-width:1200px; margin:0 auto; padding:24px; }
-    h1 { font-size:22px; margin:0 0 8px; }
-    .muted { color:var(--muted); font-size:13px; }
-    .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-    .grid-2-66 { display:grid; grid-template-columns: 2fr 1fr; gap:16px; }
-    .grid-2-50 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-    .grid-2-33 { display:grid; grid-template-columns: 1.5fr 1fr; gap:16px; }
-    .grid { display:grid; gap:16px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-    textarea { width:100%; height:190px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:13px; padding:10px; border:1px solid var(--line); border-radius:12px; background:#fff; }
-    input[type="number"]{ width:110px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; }
-    .btn { padding:8px 12px; border-radius:999px; border:0; cursor:pointer; font-weight:600; }
-    .btn.primary { background:#111827; color:#fff; }
-    .btn.alt { background:var(--blue); color:#fff; }
-    .btn.ghost { background:#eef2ff; color:#111827; }
-    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .kpi { font-size:13px; color:var(--muted); }
-
-    /* Zonas y pilas */
-    .zone-title { font-weight:700; font-size:14px; margin-bottom:8px; }
-    .zones { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-    .zone { min-height:180px; display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start; }
-    .stack { border:1px solid var(--line); border-radius:14px; padding:10px; background:#fff; min-width:120px; max-width:140px; }
-    .stack-h { font-size:12px; font-weight:700; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }
-    .stack-body { display:flex; flex-direction:column; gap:6px; min-height:24px; } /* TOPE ARRIBA */
-    .box { padding:6px 8px; font-size:12px; text-align:center; background:#f1f5f9; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 1px 0 rgba(0,0,0,.03); }
-    .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
-
-    /* Animación (clones en overlay) */
-    .overlay { position:fixed; left:0; top:0; width:100vw; height:100vh; pointer-events:none; z-index:9999; }
-    .clone { position:fixed; background:#e2e8f0; border:1px solid #cbd5e1; border-radius:8px; padding:6px 8px; font-size:12px; box-shadow:0 8px 20px rgba(0,0,0,.15); transition: transform .6s ease, opacity .6s ease; display:flex; align-items:center; justify-content:center; }
-    .highlight { outline:2px solid #60a5fa; outline-offset:2px; }
-    .list { display:flex; gap:6px; flex-wrap:wrap; }
-    .chip { font-size:12px; background:#ecfeff; border:1px solid #cffafe; color:#0e7490; padding:4px 8px; border-radius:999px; }
-    .small { font-size:12px; }
+    /* Modal */
+    .modal-backdrop { background: rgba(0,0,0,0.45); }
+    /* Simple focus ring */
+    .focus-ring:focus { outline: 2px solid #2563eb; outline-offset: 2px; }
   </style>
 </head>
-<body>
-  <div class="wrap">
-    <h1>Simulador X→Y (pares · movimientos mínimos)</h1>
-    <div class="muted">Pega tus pilas en formato <b>Xn: a,b,c...</b> (el primer número es la <b>caja superior</b>). Selecciono pilas automáticamente según la <b>meta de pares</b>, genero el plan y muestro la animación.</div>
-
-    <!-- Entrada y selección -->
-    <div class="grid-2" style="margin-top:14px;">
-      <div class="card">
-        <textarea id="input"></textarea>
-        <div class="toolbar" style="margin-top:10px;">
-          <label class="muted">Meta de pares:</label>
-          <input type="number" id="targetPairs" min="1" value="22" />
-          <button class="btn primary" id="btnSelect">Seleccionar pilas automáticamente</button>
-          <button class="btn alt" id="btnPlan">Generar plan</button>
-        </div>
-        <div class="kpi" id="kpi"></div>
-      </div>
-
-      <div class="card">
-        <div class="zone-title">Pilas seleccionadas para USAR</div>
-        <div id="useList" class="list"></div>
-        <div class="zone-title" style="margin-top:10px;">Pilas DESCARTADAS</div>
-        <div id="discardList" class="list"></div>
+<body class="bg-gray-50 text-gray-900">
+  <!-- Header -->
+  <header class="px-4 sm:px-6 lg:px-8 py-4 border-b bg-white">
+    <div class="flex items-center justify-between gap-3">
+      <h1 class="text-xl sm:text-2xl font-semibold">Rooms Kanban — Deliveries Control</h1>
+      <div class="flex items-center gap-2">
+        <button id="btnExport" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Export JSON</button>
+        <label class="px-3 py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm cursor-pointer">
+          <input id="fileExcel" type="file" accept=".xlsx,.xls,.csv" class="hidden">
+          Import Excel / CSV
+        </label>
+        <button id="btnReset" class="px-3 py-2 rounded-xl bg-red-50 text-red-700 hover:bg-red-100 text-sm">Reset (solo estados)</button>
       </div>
     </div>
 
-    <!-- CONTROLES de simulación (arriba, antes de las zonas) -->
-    <div class="card" style="margin-top:16px;">
-      <div class="toolbar">
-        <button class="btn primary" id="btnPlay">Iniciar simulación</button>
-        <button class="btn ghost" id="btnPause">Pausa</button>
-        <button class="btn ghost" id="btnStep">Paso</button>
-        <button class="btn ghost" id="btnReset">Reiniciar</button>
-        <span class="muted" id="progress"></span>
+    <!-- Filtros -->
+    <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div>
+        <label class="text-xs font-medium">Floor</label>
+        <select id="filterFloor" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
+          <option value="">All floors</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium">Room</label>
+        <input id="filterRoom" placeholder="e.g., 202" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"/>
+      </div>
+      <div>
+        <label class="text-xs font-medium">Room Type</label>
+        <select id="filterType" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
+          <option value="">All types</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium">Status</label>
+        <select id="filterStatus" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring">
+          <option value="">All</option>
+          <option value="complete">Complete</option>
+          <option value="partial">Partial</option>
+          <option value="none">No Delivered</option>
+        </select>
       </div>
     </div>
+  </header>
 
-    <!-- ZONAS (sin Z) -->
-    <div class="card" style="margin-top:16px;">
-      <div class="zones">
+  <!-- Board -->
+  <main class="p-4 sm:p-6 lg:p-8">
+    <div id="kanban" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"></div>
+  </main>
+
+  <!-- Room Modal -->
+  <div id="roomModal" class="fixed inset-0 hidden items-start justify-center p-4 modal-backdrop z-50">
+    <div class="w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4 border-b">
         <div>
-          <div class="zone-title">Originales (X)</div>
-          <div id="zoneX" class="zone"></div>
+          <h2 id="mdTitle" class="text-lg font-semibold">Room</h2>
+          <p id="mdSubtitle" class="text-xs text-gray-500"></p>
         </div>
-        <div>
-          <div class="zone-title">Finales (Y)</div>
-          <div id="zoneY" class="zone"></div>
+        <button id="mdClose" class="p-2 rounded-xl hover:bg-gray-100" aria-label="Close">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="px-5 py-4 grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <!-- Items -->
+        <section class="lg:col-span-2">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-medium">Required items</h3>
+            <div id="mdProgress" class="text-sm text-gray-600"></div>
+          </div>
+          <div id="mdItems" class="space-y-2 max-h-[52vh] overflow-auto pr-1 scroll-shadow"></div>
+        </section>
+
+        <!-- Meta -->
+        <aside class="lg:col-span-1 space-y-4">
+          <div class="border rounded-xl p-3">
+            <label class="text-xs font-medium">Verification</label>
+            <select id="mdVerifier" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring"></select>
+            <button id="mdAddVerification" class="mt-2 w-full py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm">Add verification entry</button>
+            <p class="mt-2 text-xs text-gray-500">Guarda nombre + fecha/hora. Cada vez que verifiques, se registra.</p>
+          </div>
+
+          <div class="border rounded-xl p-3">
+            <label class="text-xs font-medium block">History</label>
+            <div id="mdHistory" class="mt-1 text-sm max-h-40 overflow-auto space-y-1"></div>
+          </div>
+
+          <div class="border rounded-xl p-3">
+            <label class="text-xs font-medium block">Notes</label>
+            <textarea id="mdNotes" class="w-full mt-1 px-3 py-2 rounded-xl border bg-white focus-ring" rows="4" placeholder="Add notes…"></textarea>
+            <button id="mdSaveNotes" class="mt-2 w-full py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Save notes</button>
+          </div>
+        </aside>
+      </div>
+
+      <div class="px-5 py-3 border-t flex items-center justify-between">
+        <div class="text-sm"><span class="font-medium">Room status:</span> <span id="mdStatus" class="ml-1"></span></div>
+        <div class="flex items-center gap-2">
+          <button id="mdMarkAll" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-sm">Mark all delivered</button>
+          <button id="mdClearAll" class="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Clear all</button>
         </div>
       </div>
-    </div>
-
-    <!-- Plan de pasos -->
-    <div class="card" style="margin-top:16px;">
-      <div class="zone-title">Plan de pasos</div>
-      <ol id="steps" class="small"></ol>
     </div>
   </div>
 
-  <div class="overlay" id="overlay"></div>
-
   <script>
-    // ---------- Utilidades ----------
-    function parseInput(raw){
-      const lines = raw.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-      const piles = [];
-      for(const line of lines){
-        const m = line.match(/^(X\d+):\s*(.*)$/i);
-        if(!m) continue;
-        const id = m[1].toUpperCase();
-        const items = m[2].split(/[\s,]+/).map(x=>x.trim()).filter(Boolean).map(Number).filter(x=>!Number.isNaN(x));
-        piles.push({ id, items }); // items[0] es TOPE
-      }
-      return piles;
+    /***** QUICK HOW-TO ***************************************************
+     * 1) Click "Import Excel / CSV" y selecciona tu archivo.
+     *    Estructura esperada (puede estar en una sola hoja):
+     *      Floor | Room | RoomType | Item | Qty
+     *    También admite una hoja (opcional) llamada "Team" con:
+     *      Name
+     * 2) Los estados, historial y notas se guardan en localStorage.
+     * 3) Puedes exportar el estado con "Export JSON".
+     ********************************************************************/
+
+    // ======= Data & Storage =======
+    const STORAGE_KEY = 'moorDeliveryV1';
+
+    // Internal state
+    let DATA = {
+      rooms: [],     // [{room:'202', floor:2, type:'A1', items:[{key:'G-113', name:'Queen Bed Base', qty:2}], }]
+      team: ['Amilcar Hernandez','Milka Hernandez','Paul Team','Warehouse Crew'],
+    };
+    let STATE = loadState(); // { delivery:{[room]: { items:{itemKey:true|false}, history:[{by,ts}], notes:'' }} }
+
+    function loadState(){
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { delivery:{} }; }
+      catch(e){ return { delivery:{} }; }
     }
-    function countMap(arr){ const m=new Map(); for(const v of arr) m.set(v,(m.get(v)||0)+1); return m; }
-    function pairsInArray(arr){ const m=countMap(arr); let p=0; for(const c of m.values()) p+=Math.floor(c/2); return p; }
-    function isOrganizedPile(items){
-      if(items.length===0) return false;
-      if(items.length%2!==0) return false;
-      if(items.length>6) return false;
-      const m=countMap(items);
-      for(const c of m.values()) if(c%2!==0) return false;
+    function saveState(){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
+    }
+
+    // ======= Helpers =======
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+    const fmtDate = ts => new Date(ts).toLocaleString();
+    function statusForRoom(roomObj){
+      const items = roomObj.items || [];
+      const d = STATE.delivery[roomObj.room]?.items || {};
+      const total = items.length;
+      const delivered = items.filter(it => d[it.key] === true).length;
+      if (total === 0) return {code:'none', label:'No Delivered'};
+      if (delivered === 0) return {code:'none', label:'No Delivered'};
+      if (delivered === total) return {code:'complete', label:'Complete'};
+      return {code:'partial', label:'Partial'};
+    }
+    function badge(status){
+      const map = {
+        complete: 'text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200',
+        partial:  'text-amber-700 bg-amber-50 ring-1 ring-amber-200',
+        none:     'text-gray-600 bg-gray-100 ring-1 ring-gray-200'
+      };
+      return `<span class="px-2 py-0.5 rounded-lg text-xs ${map[status.code]}">${status.label}</span>`;
+    }
+    function unique(arr){ return Array.from(new Set(arr)); }
+
+    // ======= Rendering Kanban =======
+    const kanbanEl = $('#kanban');
+    const filterEls = {
+      floor: $('#filterFloor'),
+      room: $('#filterRoom'),
+      type: $('#filterType'),
+      status: $('#filterStatus'),
+    };
+
+    function buildFilters(){
+      // Floors
+      const floors = unique(DATA.rooms.map(r => r.floor)).sort((a,b)=>a-b);
+      filterEls.floor.innerHTML = '<option value="">All floors</option>' + floors.map(f=>`<option value="${f}">${f}</option>`).join('');
+      // Room types
+      const types = unique(DATA.rooms.map(r => r.type)).sort();
+      filterEls.type.innerHTML = '<option value="">All types</option>' + types.map(t=>`<option value="${t}">${t}</option>`).join('');
+    }
+
+    function applyFilters(room){
+      const fFloor = filterEls.floor.value;
+      const fRoom = filterEls.room.value.trim();
+      const fType = filterEls.type.value;
+      const fStatus = filterEls.status.value;
+
+      if (fFloor && String(room.floor) !== String(fFloor)) return false;
+      if (fRoom && !String(room.room).includes(fRoom)) return false;
+      if (fType && room.type !== fType) return false;
+      if (fStatus){
+        const s = statusForRoom(room).code;
+        if (s !== fStatus) return false;
+      }
       return true;
     }
-    function isComplementarySet(piles){
-      const m=new Map();
-      for(const p of piles){ if(p.items.length>6) return false; for(const v of p.items) m.set(v,(m.get(v)||0)+1); }
-      for(const c of m.values()) if(c%2!==0) return false;
-      return true;
-    }
-    function findComplementaryGroups(xPiles){
-      const groups=[]; const used=new Set();
-      // pares
-      for(let i=0;i<xPiles.length;i++){
-        if(used.has(xPiles[i].id)) continue;
-        for(let j=i+1;j<xPiles.length;j++){
-          if(used.has(xPiles[j].id)) continue;
-          const pair=[xPiles[i],xPiles[j]];
-          if(isComplementarySet(pair)){ groups.push(pair.map(p=>p.id)); used.add(xPiles[i].id); used.add(xPiles[j].id); break; }
-        }
-      }
-      // tríos
-      for(let i=0;i<xPiles.length;i++){
-        if(used.has(xPiles[i].id)) continue;
-        for(let j=i+1;j<xPiles.length;j++){
-          if(used.has(xPiles[j].id)) continue;
-          for(let k=j+1;k<xPiles.length;k++){
-            if(used.has(xPiles[k].id)) continue;
-            const trio=[xPiles[i],xPiles[j],xPiles[k]];
-            if(isComplementarySet(trio)){ groups.push(trio.map(p=>p.id)); used.add(xPiles[i].id); used.add(xPiles[j].id); used.add(xPiles[k].id); break; }
-          }
-        }
-      }
-      return { groups, usedIds:used };
-    }
 
-    // Selección automática por meta de pares (sin Z)
-    function autoSelectPilesForPairs(piles, targetPairs){
-      const organized = piles.filter(p=>isOrganizedPile(p.items));
-      const disorganized = piles.filter(p=>!isOrganizedPile(p.items));
-      const selected=[]; let pairsAccum=0;
+    function renderKanban(){
+      // Agrupar por piso
+      const byFloor = {};
+      DATA.rooms.forEach(r => {
+        if (!applyFilters(r)) return;
+        byFloor[r.floor] = byFloor[r.floor] || [];
+        byFloor[r.floor].push(r);
+      });
 
-      // 1) Y directas
-      for(const p of organized){
-        if(pairsAccum>=targetPairs) break;
-        selected.push(p); pairsAccum+=pairsInArray(p.items);
-      }
-      if(pairsAccum>=targetPairs) return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
+      const floorsSorted = Object.keys(byFloor).sort((a,b)=>Number(a)-Number(b));
+      let html = '';
+      floorsSorted.forEach(floor => {
+        const rooms = byFloor[floor].sort((a,b)=>Number(a.room)-Number(b.room));
+        html += `
+          <section class="bg-white border rounded-2xl shadow-sm flex flex-col">
+            <div class="px-4 py-3 border-b flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-8 h-8 rounded-xl bg-gray-900 text-white grid place-items-center font-semibold">${floor}</span>
+                <h2 class="font-medium">Floor ${floor}</h2>
+              </div>
+              <span class="text-xs text-gray-500">${rooms.length} rooms</span>
+            </div>
+            <div class="p-3 space-y-3 max-h-[70vh] overflow-auto scroll-shadow">
+              ${rooms.map(roomCard).join('')}
+            </div>
+          </section>
+        `;
+      });
 
-      // 2) Complementarios
-      const comp = findComplementaryGroups(disorganized);
-      const usedComp=new Set();
-      for(const grp of comp.groups){
-        if(pairsAccum>=targetPairs) break;
-        const groupPiles = grp.map(id=>disorganized.find(p=>p.id===id)).filter(Boolean);
-        const addPairs = pairsInArray(groupPiles.flatMap(p=>p.items));
-        for(const gp of groupPiles){ if(!selected.includes(gp)) selected.push(gp); usedComp.add(gp.id); }
-        pairsAccum+=addPairs;
-      }
-      if(pairsAccum>=targetPairs) return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
-
-      // 3) Potencial interno
-      const rest = disorganized.filter(p=>!usedComp.has(p.id));
-      rest.sort((a,b)=>pairsInArray(b.items)-pairsInArray(a.items));
-      for(const p of rest){ if(pairsAccum>=targetPairs) break; selected.push(p); pairsAccum+=pairsInArray(p.items); }
-
-      return { selected, discarded: piles.filter(p=>!selected.includes(p)) };
+      kanbanEl.innerHTML = html || `<div class="text-sm text-gray-600">No rooms match your filters.</div>`;
+      lucide.createIcons();
+      // Wire click handlers
+      $$('.room-card').forEach(card=>{
+        card.addEventListener('click', ()=> openRoomModal(card.dataset.room));
+      });
     }
 
-    // Plan de movimientos (top-first, grupos 2–3, solo X→Y; sin Z)
-    function planMoves(sourcePiles, targetPairs){
-      const steps=[]; const Y=[]; const X=sourcePiles.map(p=>({ id:p.id, items:[...p.items] }));
-      let yCounter=1, pairsDone=0;
-
-      function openY(){ const id=`Y${yCounter++}`; Y.push({id, items:[]}); steps.push({action:'open', id}); return Y[Y.length-1]; }
-      function markY(p){ const id=`Y${yCounter++}`; Y.push({id, items:[...p.items]}); steps.push({action:'markY', from:p.id, to:id, note:'Directo: pila ya organizada'}); }
-      function move(k, from, to, note){ const g=from.items.splice(0,k); to.items = [...g, ...to.items]; steps.push({action:'move', count:k, from:from.id, to:to.id, note}); }
-
-      // 1) Y directas
-      for(const p of X){
-        if(isOrganizedPile(p.items) && pairsDone<targetPairs){
-          markY(p); pairsDone+=pairsInArray(p.items);
-        }
-      }
-
-      const scoreTop=(p)=>{ const top=p.items.slice(0,3); const m=countMap(top); let s=0; for(const c of m.values()) s=Math.max(s,c); return s + pairsInArray(p.items)*0.1; };
-      function getY(){ let y=Y.find(yy=>yy.items.length<6); if(!y){ y=openY(); } return y; }
-
-      // 2) Construcción con X→Y
-      let progress=true;
-      while(pairsDone<targetPairs && progress){
-        progress=false;
-        const cands = X.filter(p=>p.items.length>0 && !isOrganizedPile(p.items));
-        if(cands.length===0) break;
-        cands.sort((a,b)=>scoreTop(b)-scoreTop(a));
-
-        for(const src of cands){
-          const y=getY();
-          let moved=false;
-          for(const k of [3,2]){
-            if(src.items.length>=k && y.items.length+k<=6){
-              const before=pairsInArray(y.items);
-              const tentative=[...y.items, ...src.items.slice(0,k)];
-              if(pairsInArray(tentative)>=before){
-                move(k, src, y, 'Top-group para aumentar pares');
-                const after=pairsInArray(y.items);
-                if(after>before){ pairsDone+=after-before; moved=true; progress=true; break; }
-                moved=true; progress=true; break;
-              }
-            }
-          }
-          if(pairsDone>=targetPairs) break;
-        }
-      }
-      return { steps, pairsDone };
+    function roomCard(room){
+      const st = statusForRoom(room);
+      return `
+        <article class="room-card cursor-pointer border rounded-xl p-3 hover:shadow-md transition bg-white" data-room="${room.room}">
+          <div class="flex items-start justify-between">
+            <div>
+              <div class="text-lg font-semibold leading-none">${room.room}</div>
+              <div class="mt-1 text-xs text-gray-500">Type <span class="font-medium">${room.type}</span></div>
+            </div>
+            ${badge(st)}
+          </div>
+        </article>
+      `;
     }
 
-    // ---------- Render / DOM ----------
-    const elInput = document.getElementById('input');
-    const elTarget = document.getElementById('targetPairs');
-    const elBtnSelect = document.getElementById('btnSelect');
-    const elBtnPlan = document.getElementById('btnPlan');
-    const elUse = document.getElementById('useList');
-    const elDiscard = document.getElementById('discardList');
-    const elZoneX = document.getElementById('zoneX');
-    const elZoneY = document.getElementById('zoneY');
-    const elSteps = document.getElementById('steps');
-    const elProgress = document.getElementById('progress');
-    const elKpi = document.getElementById('kpi');
-    const overlay = document.getElementById('overlay');
-    const btnPlay = document.getElementById('btnPlay');
-    const btnPause = document.getElementById('btnPause');
-    const btnStep = document.getElementById('btnStep');
-    const btnReset = document.getElementById('btnReset');
+    // ======= Modal (Room details) =======
+    const modal = $('#roomModal');
+    const md = {
+      title: $('#mdTitle'),
+      subtitle: $('#mdSubtitle'),
+      items: $('#mdItems'),
+      status: $('#mdStatus'),
+      progress: $('#mdProgress'),
+      verifier: $('#mdVerifier'),
+      addVerification: $('#mdAddVerification'),
+      history: $('#mdHistory'),
+      notes: $('#mdNotes'),
+      saveNotes: $('#mdSaveNotes'),
+      markAll: $('#mdMarkAll'),
+      clearAll: $('#mdClearAll'),
+      close: $('#mdClose'),
+    };
+    let currentRoom = null;
 
-    // Prefill con tu set de ejemplo (ya horizontalizado)
-    elInput.value =
-`X1: 93,93,96,94,94,96
-X2: 112,108,40,112,106,105
-X3: 129,120,6,5,5,119
-X4: 101,143,68,52,55,59
-X5: 29,29,28,28,27
-X6: 128,59,63,63,66,66
-X7: 205,218,218,204,213,213
-X8: 123,17,14,16,14,13
-X9: 16,53,115,37,84,83
-X10: 106,6,142,120,142
-X11: 1,57,119,109,19,13
-X12: 58,133,53,57,58,49
-X13: 23,23,25,25,127,127
-X14: 39,108,128,70,82
-X15: 138
-X16: 207,153,158,156,157,156
-X17: 134,132,132,73,73,133
-X18: 21,26,26,21
-X19: 143,22,35,122,138
-X20: 102,101,86,102,84
-X21: 87,31,68,67,55,67,52`;
+    function openRoomModal(roomNumber){
+      currentRoom = DATA.rooms.find(r=> String(r.room) === String(roomNumber));
+      if (!currentRoom) return;
 
-    let pilesAll = [];
-    let selection = null;
-    let plan = null;
+      // Header
+      md.title.textContent = `Room ${currentRoom.room}`;
+      md.subtitle.textContent = `Floor ${currentRoom.floor} • Type ${currentRoom.type}`;
 
-    let zoneX=[], zoneY=[];
-    let playing=false, stepIdx=0, timer=null;
-
-    function renderStack(p){ return `
-      <div class="stack" id="pile-${p.id}">
-        <div class="stack-h">
-          <span>${p.id}</span>
-          <span class="badge">${p.items.length}</span>
-        </div>
-        <div class="stack-body">
-          ${p.items.map((v,i)=>`<div class="box" data-pile="${p.id}" data-idx="${i}" data-val="${v}">${v}</div>`).join('')}
-        </div>
-      </div>`; }
-
-    function renderZones(){
-      elZoneX.innerHTML = zoneX.map(renderStack).join('');
-      elZoneY.innerHTML = zoneY.map(renderStack).join('');
-    }
-    function renderLists(){
-      elUse.innerHTML = selection ? selection.selected.map(p=>`<span class="chip">${p.id}</span>`).join('') : '';
-      elDiscard.innerHTML = selection ? selection.discarded.map(p=>`<span class="chip" style="background:#fff1f2;border-color:#ffe4e6;color:#be123c;">${p.id}</span>`).join('') : '';
-    }
-    function renderSteps(){
-      if(!plan){ elSteps.innerHTML=''; return; }
-      elSteps.innerHTML = plan.steps.map((s,i)=> {
-        if(s.action==='markY') return `<li>Marcar <b>${s.from}</b> → <b>${s.to}</b> <span class="muted">(${s.note||''})</span></li>`;
-        if(s.action==='open') return `<li>Abrir <b>${s.id}</b></li>`;
-        if(s.action==='move') return `<li>Mover <b>${s.count}</b> (top) de <b>${s.from}</b> → <b>${s.to}</b> <span class="muted">(${s.note||''})</span></li>`;
-        return `<li>${JSON.stringify(s)}</li>`;
+      // Items list
+      const d = STATE.delivery[currentRoom.room]?.items || {};
+      md.items.innerHTML = currentRoom.items.map(it=>{
+        const checked = !!d[it.key];
+        return `
+          <label class="flex items-center gap-3 border rounded-xl p-2.5">
+            <input type="checkbox" data-item="${it.key}" ${checked?'checked':''}
+              class="h-4 w-4 rounded border-gray-300 text-gray-900 focus-ring">
+            <div class="flex-1">
+              <div class="text-sm font-medium">${it.key} — ${it.name}</div>
+              <div class="text-xs text-gray-500">Qty: <span class="px-1.5 py-0.5 rounded bg-gray-100">${it.qty}</span></div>
+            </div>
+          </label>
+        `;
       }).join('');
-    }
-    function setProgress(){
-      const total = plan ? plan.steps.length : 0;
-      elProgress.textContent = plan ? `Paso ${Math.min(stepIdx,total)}/${total}` : '';
+
+      // Team dropdown
+      md.verifier.innerHTML = DATA.team.map(n=>`<option value="${n}">${n}</option>`).join('');
+
+      // History
+      renderHistory();
+
+      // Notes
+      md.notes.value = STATE.delivery[currentRoom.room]?.notes || '';
+
+      // Status/progress
+      updateModalStatus();
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      lucide.createIcons();
+
+      // Events
+      $$('#mdItems input[type="checkbox"]', document).forEach(cb=>{
+        cb.addEventListener('change', ()=>{
+          const key = cb.dataset.item;
+          STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
+          STATE.delivery[currentRoom.room].items[key] = cb.checked;
+          saveState();
+          updateModalStatus();
+          renderKanban();
+        });
+      });
     }
 
-    // Helpers
-    function cloneStateFromSelection(){
-      const base = (selection?.selected ?? pilesAll).map(p=>({ id:p.id, items:[...p.items] }));
-      zoneX = base; zoneY=[];
-      renderZones();
+    function closeRoomModal(){
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      currentRoom = null;
     }
-    function findPile(id){
-      for(const list of [zoneX, zoneY]){
-        const p = list.find(pp=>pp.id===id);
-        if(p) return { p, list };
+
+    function updateModalStatus(){
+      if (!currentRoom) return;
+      const st = statusForRoom(currentRoom);
+      md.status.innerHTML = badge(st);
+      // Progress
+      const total = currentRoom.items.length;
+      const d = STATE.delivery[currentRoom.room]?.items || {};
+      const delivered = currentRoom.items.filter(it => d[it.key]).length;
+      md.progress.textContent = `${delivered}/${total} delivered`;
+    }
+
+    function renderHistory(){
+      const history = STATE.delivery[currentRoom.room]?.history || [];
+      if (history.length === 0){
+        md.history.innerHTML = `<div class="text-gray-500 text-sm">No entries yet.</div>`;
+        return;
       }
-      return null;
+      md.history.innerHTML = history.slice().reverse().map(h=>`
+        <div class="text-sm"><span class="font-medium">${h.by}</span> • <span class="text-gray-500">${fmtDate(h.ts)}</span></div>
+      `).join('');
     }
 
-    // ---------- Animación ----------
-    function bbox(el){ const r=el.getBoundingClientRect(); return {x:r.left, y:r.top, w:r.width, h:r.height}; }
-    function animateMoveBoxes(fromId, toId, k=1, onDone){
-      const fromPile = document.querySelector(`#pile-${CSS.escape(fromId)} .stack-body`);
-      const toPile = document.querySelector(`#pile-${CSS.escape(toId)} .stack-body`);
-      if(!fromPile || !toPile){ onDone&&onDone(); return; }
-
-      const boxes = Array.from(fromPile.querySelectorAll('.box')).slice(0, k); // TOP = primeros k
-      if(boxes.length===0){ onDone&&onDone(); return; }
-
-      const clones=[];
-      const destRect = bbox(toPile);
-      const boxH = boxes[0].getBoundingClientRect().height + 6; // gap
-      const startOffset = 0; // arriba
-
-      boxes.forEach((b)=>{
-        const r=bbox(b);
-        const c=document.createElement('div');
-        c.className='clone';
-        c.style.left=r.x+'px'; c.style.top=r.y+'px'; c.style.width=r.w+'px'; c.style.height=r.h+'px';
-        c.textContent = b.dataset.val;
-        overlay.appendChild(c);
-        clones.push({c, r});
-        const pileEl = document.getElementById('pile-'+fromId);
-        pileEl && pileEl.classList.add('highlight');
-        setTimeout(()=>pileEl && pileEl.classList.remove('highlight'), 400);
+    // ======= Import / Export =======
+    async function parseWorkbook(wb){
+      // Try to find headers in any sheet
+      let rows = [];
+      wb.SheetNames.forEach(name=>{
+        const ws = wb.Sheets[name];
+        const arr = XLSX.utils.sheet_to_json(ws, {defval:''});
+        rows = rows.concat(arr);
       });
 
-      clones.forEach((o,idx)=>{
-        const dx = destRect.x - o.r.x;
-        const dy = (destRect.y + startOffset + idx*boxH) - o.r.y;
-        requestAnimationFrame(()=>{ o.c.style.transform=`translate(${dx}px, ${dy}px)`; });
+      // If there is a sheet "Team"
+      let team = [];
+      if (wb.SheetNames.includes('Team')){
+        const wsT = wb.Sheets['Team'];
+        const arrT = XLSX.utils.sheet_to_json(wsT, {defval:''});
+        team = unique(arrT.map(r => (r.Name || r.NAME || r.name || '').toString().trim()).filter(Boolean));
+      }
+
+      // Expect at least columns: Floor | Room | RoomType | Item | Qty
+      const norm = rows
+        .map(r => ({
+          floor: Number(r.Floor ?? r.floor ?? r.Piso ?? r.piso ?? r.Level ?? r.level ?? ''),
+          room:  String(r.Room ?? r.room ?? r.Habitacion ?? r.habitacion ?? '').trim(),
+          type:  String(r.RoomType ?? r.Type ?? r.Room_Type ?? r.type ?? '').trim(),
+          item:  String(r.Item ?? r.ItemName ?? r['Item Name'] ?? r.item ?? '').trim(),
+          qty:   Number(r.Qty ?? r.Quantity ?? r.qty ?? r.quantity ?? 1),
+        }))
+        .filter(r => !!r.floor && !!r.room && !!r.item);
+
+      // Group into rooms
+      const map = new Map();
+      norm.forEach(r=>{
+        const key = r.room;
+        if (!map.has(key)){
+          map.set(key, { room: r.room, floor: r.floor, type: r.type || '', items: [] });
+        }
+        const room = map.get(key);
+        room.floor = room.floor || r.floor;
+        room.type = room.type || r.type || '';
+        room.items.push({ key: r.item, name: r.item, qty: r.qty || 1 });
       });
 
-      setTimeout(()=>{
-        clones.forEach(o=>o.c.remove());
-        const dst = document.getElementById('pile-'+toId);
-        dst && (dst.classList.add('highlight'), setTimeout(()=>dst.classList.remove('highlight'), 400));
-        onDone && onDone();
-      }, 650);
+      DATA.rooms = Array.from(map.values());
+      if (team.length) DATA.team = team;
+
+      // Rebuild UI
+      buildFilters();
+      renderKanban();
     }
 
-    function animateMarkYPile(fromId, toId, onDone){
-      const el = document.getElementById('pile-'+fromId);
-      if(!el){
+    // ======= Seed (example) if no Excel loaded yet =======
+    function seedExample(){
+      DATA.rooms = [
+        {room:'202', floor:2, type:'A1', items:[
+          {key:'G-113A', name:'Queen Bed Base ADA', qty:1},
+          {key:'G-113', name:'Queen Bed Base', qty:2},
+          {key:'G-105B', name:'Queen Headboard', qty:1},
+          {key:'G-102', name:'Desk Chair', qty:1},
+          {key:'G-104', name:'Nightstand', qty:1},
+          {key:'MB-180', name:'Reading Light', qty:4},
+        ]},
+        {room:'203', floor:2, type:'F', items:[
+          {key:'G-114', name:'King Bed Base', qty:1},
+          {key:'G-105A', name:'King Headboard', qty:1},
+          {key:'G-111', name:'Side Chair', qty:1},
+        ]},
+        {room:'301', floor:3, type:'I', items:[
+          {key:'G-103', name:'Desk Chair', qty:1},
+          {key:'G-112', name:'Luggage Rack', qty:1},
+        ]},
+        {room:'302', floor:3, type:'A1', items:[
+          {key:'G-113', name:'Queen Bed Base', qty:2},
+          {key:'G-104', name:'Nightstand', qty:1},
+        ]},
+      ];
+      buildFilters();
+      renderKanban();
+    }
+
+    // ======= Events =======
+    // Filters
+    Object.values(filterEls).forEach(el => el.addEventListener('input', renderKanban));
+
+    // File input
+    $('#fileExcel').addEventListener('change', async (e)=>{
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, {type:'array'});
+      await parseWorkbook(wb);
+    });
+
+    // Export
+    $('#btnExport').addEventListener('click', ()=>{
+      const payload = {
+        DATA, STATE
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'rooms-deliveries.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    // Reset (solo estados)
+    $('#btnReset').addEventListener('click', ()=>{
+      if (!confirm('Clear all delivery states, history and notes?')) return;
+      STATE = { delivery:{} };
+      saveState();
+      renderKanban();
+      if (currentRoom) openRoomModal(currentRoom.room);
+    });
+
+    // Modal actions
+    md.close.addEventListener('click', closeRoomModal);
+    modal.addEventListener('click', (e)=>{ if (e.target === modal) closeRoomModal(); });
+
+    md.addVerification.addEventListener('click', ()=>{
+      if (!currentRoom) return;
+      const by = md.verifier.value || '—';
+      const ts = Date.now();
+      STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
+      STATE.delivery[currentRoom.room].history.push({by, ts});
+      saveState();
+      renderHistory();
+    });
+
+    md.saveNotes.addEventListener('click', ()=>{
+      if (!currentRoom) return;
+      STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
+      STATE.delivery[currentRoom.room].notes = md.notes.value || '';
+      saveState();
+      alert('Notes saved');
+    });
+
+    md.markAll.addEventListener('click', ()=>{
+      if (!currentRoom) return;
+      STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
+      currentRoom.items.forEach(it => { STATE.delivery[currentRoom.room].items[it.key] = true; });
+      saveState();
+      updateModalStatus();
+      renderKanban();
+      openRoomModal(currentRoom.room); // refresh checkboxes
+    });
+
+    md.clearAll.addEventListener('click', ()=>{
+      if (!currentRoom) return;
+      STATE.delivery[currentRoom.room] = STATE.delivery[currentRoom.room] || {items:{}, history:[], notes:''};
+      currentRoom.items.forEach(it => { STATE.delivery[currentRoom.room].items[it.key] = false; });
+      saveState();
+      updateModalStatus();
+      renderKanban();
+      openRoomModal(currentRoom.room);
+    });
+
+    // Initial
+    seedExample(); // Muestra demo hasta que importes tu Excel
+    buildFilters();
+    renderKanban();
+    lucide.createIcons();
+  </script>
+</body>
+</html>
